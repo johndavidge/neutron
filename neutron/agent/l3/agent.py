@@ -33,6 +33,7 @@ from neutron.agent.l3 import router_processing_queue as queue
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ra
+from neutron.agent.linux import pd
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.agent import rpc as agent_rpc
 from neutron.common import constants as l3_constants
@@ -290,6 +291,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         router_id = self.get_router_id(ns)
         if router_id in self.router_info:
             self.router_info[router_id].radvd.disable()
+        pd.disable_ipv6_pd(router_id, ns, self.root_helper)
         ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
@@ -461,6 +463,14 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         # Enable RA
         if new_ipv6_port or old_ipv6_port:
             ri.radvd.enable(internal_ports)
+
+        # Enable PD
+        if new_ipv6_port or old_ipv6_port:
+            pd.enable_ipv6_pd(ri.router_id,
+                              ri.ns_name,
+                              internal_ports,
+                              self.get_internal_device_name,
+                              self.root_helper)
 
         existing_devices = self._get_existing_devices(ri)
         current_internal_devs = set([n for n in existing_devices
