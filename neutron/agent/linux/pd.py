@@ -53,7 +53,7 @@ iface {{ interface_name }} {
 
 
 def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
-    dibbler_conf = utils.get_conf_file_name(cfg.CONF.ra_confs,
+    dibbler_conf = utils.get_conf_file_name(cfg.CONF.pd_confs,
                                             router_id,
                                             'client.conf',
                                             True)
