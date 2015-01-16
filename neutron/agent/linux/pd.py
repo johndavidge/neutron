@@ -73,7 +73,8 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
 
 def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
     def callback(pid_file):
-        dibbler_cmd = ['dibbler-client']
+        dibbler_cmd = ['dibbler-client',
+                       'start']
         return dibbler_cmd
 
     dibbler = external_process.ProcessManager(cfg.CONF,
