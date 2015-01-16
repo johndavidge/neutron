@@ -28,7 +28,7 @@ LOG = logging.getLogger(__name__)
 
 OPTS = [
     cfg.StrOpt('pd_confs',
-               default='/etc/dibbler/client.conf',
+               default='/etc/dibbler',
                help=_('Location to store IPv6 PD config files')),
 ]
 
