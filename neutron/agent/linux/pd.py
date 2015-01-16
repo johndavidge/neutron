@@ -59,7 +59,7 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
                                             True)
     buf = six.StringIO()
     for p in router_ports:
-        if p['subnet']['ip_version'] == 6:
+        if netaddr.IPNetwork(p['subnet']['cidr']).version == 6:
             interface_name = dev_name_helper(p['id'])
             ra_mode = p['subnet']['ipv6_ra_mode']
             buf.write('%s' % CONFIG_TEMPLATE.render(
@@ -88,7 +88,7 @@ def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
 def enable_ipv6_pd(router_id, router_ns, router_ports,
                    dev_name_helper, root_helper):
     for p in router_ports:
-        if p['subnet']['ip_version'] == 6:
+        if netaddr.IPNetwork(p['subnet']['cidr']).version == 6:
             break
     else:
         # Kill the daemon if it's running
