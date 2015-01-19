@@ -67,7 +67,10 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
                 interface_name=interface_name,
                 constants=constants))
 
-    utils.replace_file(dibbler_conf, buf.getvalue())
+    # Permissions are an issue here with dibbler's requirement
+    # for conf files to be under /etc. Need to look at fixing
+    # this in dibbler upstream. For now use the master conf file.
+    # utils.replace_file(dibbler_conf, buf.getvalue())
     return dibbler_conf
 
 
@@ -76,6 +79,14 @@ def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
         dibbler_cmd = ['dibbler-client',
                        'start']
         return dibbler_cmd
+
+    # Create a bridge between the router ns and the global ns
+    veth_create_cmd = ['ip link add veth0 type veth peer name veth1']
+    veth_link_cmd = ['ip link set veth1 netns',
+                     router_ns]
+
+    utils.execute(veth_create_cmd, root_helper)
+    utils.execute(veth_link_cmd, root_helper)
 
     dibbler = external_process.ProcessManager(cfg.CONF,
                                               router_id,
