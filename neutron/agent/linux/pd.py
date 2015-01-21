@@ -34,6 +34,14 @@ OPTS = [
 
 cfg.CONF.register_opts(OPTS)
 
+OPTS = [
+    cfg.StrOpt('tmp_pd_confs',
+               default='$state_path/dibbler',
+               help=_('Location to store temporary IPv6 PD config files')),
+]
+
+cfg.CONF.register_opts(OPTS)
+
 CONFIG_TEMPLATE = jinja2.Template("""
 # Config for dibbler-client.
 
@@ -57,6 +65,11 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
                                             router_id,
                                             'client.conf',
                                             True)
+
+    tmp_conf = utils.get_conf_file_name(cfg.CONF.tmp_pd_confs,
+                                        router_id,
+                                        'client.conf',
+                                        True)
     buf = six.StringIO()
     for p in router_ports:
         if netaddr.IPNetwork(p['subnet']['cidr']).version == 6:
@@ -67,10 +80,7 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
                 interface_name=interface_name,
                 constants=constants))
 
-    # Permissions are an issue here with dibbler's requirement
-    # for conf files to be under /etc. Need to look at fixing
-    # this in dibbler upstream. For now use the master conf file.
-    # utils.replace_file(dibbler_conf, buf.getvalue())
+    utils.replace_root_file(dibbler_conf, buf.getvalue())
     return dibbler_conf
 
 
@@ -85,8 +95,8 @@ def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
     veth_link_cmd = ['ip link set veth1 netns',
                      router_ns]
 
-    utils.execute(veth_create_cmd, root_helper)
-    utils.execute(veth_link_cmd, root_helper)
+    #utils.execute(veth_create_cmd)
+    #utils.execute(veth_link_cmd)
 
     dibbler = external_process.ProcessManager(cfg.CONF,
                                               router_id,
