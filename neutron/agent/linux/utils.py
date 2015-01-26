@@ -116,22 +116,6 @@ def replace_file(file_name, data):
     os.rename(tmp_file.name, file_name)
 
 
-def replace_root_file(file_name, tmp_file_name, data):
-    """Accomplishes the same task as replace_file, but for directories
-       with root only access.
-    """
-
-    base_dir = os.path.dirname(os.path.abspath(tmp_file_name))
-    tmp_file = tempfile.NamedTemporaryFile('w+', dir=base_dir, delete=False)
-    tmp_file.write(data)
-    tmp_file.close()
-    os.chmod(tmp_file.name, 0o644)
-    cmd = ['mv',
-           temp_file.name,
-           file_name]
-    execute(cmd, 'sudo')
-
-
 def find_child_pids(pid):
     """Retrieve a list of the pids of child processes of the given pid."""
 
