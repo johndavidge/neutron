@@ -80,7 +80,7 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
                 interface_name=interface_name,
                 constants=constants))
 
-    utils.replace_root_file(dibbler_conf, buf.getvalue())
+    utils.replace_file(dibbler_conf, buf.getvalue())
     return dibbler_conf
 
 
