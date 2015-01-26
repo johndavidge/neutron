@@ -15,6 +15,7 @@ arping: CommandFilter, arping, root
 sysctl: CommandFilter, sysctl, root
 route: CommandFilter, route, root
 radvd: CommandFilter, radvd, root
+dibbler: CommandFilter, dibbler-client, root
 
 # metadata proxy
 metadata_proxy: CommandFilter, neutron-ns-metadata-proxy, root
