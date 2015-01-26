@@ -28,7 +28,7 @@ LOG = logging.getLogger(__name__)
 
 OPTS = [
     cfg.StrOpt('pd_confs',
-               default='/etc/dibbler/client.conf',
+               default='$state_path/pd',
                help=_('Location to store IPv6 PD config files')),
 ]
 
@@ -53,13 +53,13 @@ iface {{ interface_name }} {
 
 
 def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
-    dibbler_conf = utils.get_conf_file_name(cfg.CONF.ra_confs,
+    dibbler_conf = utils.get_conf_file_name(cfg.CONF.pd_confs,
                                             router_id,
                                             'client.conf',
                                             True)
     buf = six.StringIO()
     for p in router_ports:
-        if p['subnet']['ip_version'] == 6:
+        if netaddr.IPNetwork(p['subnet']['cidr']).version == 6:
             interface_name = dev_name_helper(p['id'])
             ra_mode = p['subnet']['ipv6_ra_mode']
             buf.write('%s' % CONFIG_TEMPLATE.render(
@@ -73,7 +73,9 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
 
 def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
     def callback(pid_file):
-        dibbler_cmd = ['dibbler-client']
+        dibbler_cmd = ['dibbler-client',
+                       'run',
+                       '-C', '%s' % dibbler_conf]
         return dibbler_cmd
 
     dibbler = external_process.ProcessManager(cfg.CONF,
@@ -88,7 +90,7 @@ def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
 def enable_ipv6_pd(router_id, router_ns, router_ports,
                    dev_name_helper, root_helper):
     for p in router_ports:
-        if p['subnet']['ip_version'] == 6:
+        if netaddr.IPNetwork(p['subnet']['cidr']).version == 6:
             break
     else:
         # Kill the daemon if it's running
