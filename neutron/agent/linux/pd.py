@@ -28,7 +28,7 @@ LOG = logging.getLogger(__name__)
 
 OPTS = [
     cfg.StrOpt('pd_confs',
-               default='/etc/dibbler',
+               default='$state_path/pd',
                help=_('Location to store IPv6 PD config files')),
 ]
 
@@ -87,7 +87,8 @@ def _generate_dibbler_conf(router_id, router_ports, dev_name_helper):
 def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
-                       'start']
+                       'run',
+                       '-C', '%s' % dibbler_conf]
         return dibbler_cmd
 
     # Create a bridge between the router ns and the global ns
