@@ -40,6 +40,9 @@ CONFIG_TEMPLATE = jinja2.Template("""
 # 8 (Debug) is most verbose. 7 (Info) is usually the best option
 log-level 7
 
+# inactive-mode for testing
+inactive-mode
+
 {% if ra_mode == constants.DHCPV6_STATELESS %}
 stateless
 {% endif %}
