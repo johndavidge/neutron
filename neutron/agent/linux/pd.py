@@ -41,7 +41,7 @@ CONFIG_TEMPLATE = jinja2.Template("""
 log-level 7
 
 # inactive-mode for testing
-inactive-mode
+#inactive-mode
 
 {% if ra_mode == constants.DHCPV6_STATELESS %}
 stateless
@@ -81,6 +81,7 @@ def _spawn_dibbler(router_id, dibbler_conf, router_ns, root_helper):
                        'run',
                        '-C', '%s' % dibbler_conf,
                        '-P', '%s' % pid_file]
+                       #'> /home/john/dibbler_log.txt 2>&1']
         return dibbler_cmd
 
     dibbler = external_process.ProcessManager(cfg.CONF,
