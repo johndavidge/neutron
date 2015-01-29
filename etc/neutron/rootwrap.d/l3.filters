@@ -16,6 +16,7 @@ sysctl: CommandFilter, sysctl, root
 route: CommandFilter, route, root
 radvd: CommandFilter, radvd, root
 dibbler: CommandFilter, dibbler-client, root
+dibbler-local: CommandFilter, /home/john/development/personal/dibbler/dibbler-client, root
 
 # metadata proxy
 metadata_proxy: CommandFilter, neutron-ns-metadata-proxy, root
