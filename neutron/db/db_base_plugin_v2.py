@@ -1077,6 +1077,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
         s = subnet['subnet']
 
+        # Allow for temporary CIDRs used for Prefix Delegation
+        # Make sure gateway_ip is None
+        if subnet['subnet']['cidr'] == '::/64':
+            s['gateway_ip'] = None
+
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
             s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
 
@@ -1093,7 +1098,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         tenant_id = self._get_tenant_id_for_create(context, s)
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, s["network_id"])
-            self._validate_subnet_cidr(context, network, s['cidr'])
+            # Do not check for CIDR overlap if subnet has a temp
+            # Prefix Delegation CIDR
+            if subnet['subnet']['cidr'] != '::/64':
+                self._validate_subnet_cidr(context, network, s['cidr'])
             # The 'shared' attribute for subnets is for internal plugin
             # use only. It is not exposed through the API
             args = {'tenant_id': tenant_id,
