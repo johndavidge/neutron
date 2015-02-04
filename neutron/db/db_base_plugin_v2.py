@@ -392,29 +392,35 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 subnet_id = subnet['id']
 
             if 'ip_address' in fixed:
-                # Ensure that the IP's are unique
-                if not NeutronDbPluginV2._check_unique_ip(context, network_id,
-                                                          subnet_id,
-                                                          fixed['ip_address']):
-                    raise n_exc.IpAddressInUse(net_id=network_id,
-                                               ip_address=fixed['ip_address'])
+                # Ignore temporary Prefix Delegation CIDRs
+                if not subnet['cidr'] == '::/64':
+                    # Ensure that the IP's are unique
+                    if not NeutronDbPluginV2._check_unique_ip(
+                                             context,
+                                             network_id,
+                                             subnet_id,
+                                             fixed['ip_address']):
+                        raise n_exc.IpAddressInUse(
+                                    net_id=network_id,
+                                    ip_address=fixed['ip_address'])
 
-                # Ensure that the IP is valid on the subnet
-                if (not found and
-                    not self._check_subnet_ip(subnet['cidr'],
-                                              fixed['ip_address'])):
-                    msg = _('IP address %s is not a valid IP for the defined '
-                            'subnet') % fixed['ip_address']
-                    raise n_exc.InvalidInput(error_message=msg)
-                if (ipv6_utils.is_auto_address_subnet(subnet) and
-                    device_owner not in
-                        constants.ROUTER_INTERFACE_OWNERS):
-                    msg = (_("IPv6 address %(address)s can not be directly "
-                            "assigned to a port on subnet %(id)s since the "
-                            "subnet is configured for automatic addresses") %
-                           {'address': fixed['ip_address'],
-                            'id': subnet_id})
-                    raise n_exc.InvalidInput(error_message=msg)
+                    # Ensure that the IP is valid on the subnet
+                    if (not found and
+                        not self._check_subnet_ip(subnet['cidr'],
+                                                  fixed['ip_address'])):
+                        msg = _('IP address %s is not a valid IP for the '
+                                'defined subnet') % fixed['ip_address']
+                        raise n_exc.InvalidInput(error_message=msg)
+                    if (ipv6_utils.is_auto_address_subnet(subnet) and
+                        device_owner not in
+                            constants.ROUTER_INTERFACE_OWNERS):
+                        msg = (_("IPv6 address %(address)s can not be "
+                                 "directly assigned to a port on subnet "
+                                 "%(id)s since the subnet is configured for "
+                                 "automatic addresses") %
+                               {'address': fixed['ip_address'],
+                                'id': subnet_id})
+                        raise n_exc.InvalidInput(error_message=msg)
                 fixed_ip_set.append({'subnet_id': subnet_id,
                                      'ip_address': fixed['ip_address']})
             else:
