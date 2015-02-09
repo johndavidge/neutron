@@ -393,7 +393,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             if 'ip_address' in fixed:
                 # Ignore temporary Prefix Delegation CIDRs
-                if not subnet['cidr'] == '::/64':
+                if not subnet['cidr'] == TEMP_PD_PREFIX:
                     # Ensure that the IP's are unique
                     if not NeutronDbPluginV2._check_unique_ip(
                                              context,
@@ -1044,7 +1044,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
         # Allow for temporary CIDRs used for Prefix Delegation
         # Make sure gateway_ip is None
-        if subnet['subnet']['cidr'] == '::/64':
+        if subnet['subnet']['cidr'] == TEMP_PD_PREFIX:
             s['gateway_ip'] = None
 
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
@@ -1065,7 +1065,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             network = self._get_network(context, s["network_id"])
             # Do not check for CIDR overlap if subnet has a temp
             # Prefix Delegation CIDR
-            if subnet['subnet']['cidr'] != '::/64':
+            if subnet['subnet']['cidr'] != TEMP_PD_PREFIX:
                 self._validate_subnet_cidr(context, network, s['cidr'])
             # The 'shared' attribute for subnets is for internal plugin
             # use only. It is not exposed through the API
