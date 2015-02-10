@@ -454,7 +454,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         new_ipv6_port = False
         old_ipv6_port = False
         for p in new_ports:
-            if p['subnet']['cidr'] == '::/64':
+            if p['subnet']['cidr'] == l3_constants.TEMP_PD_PREFIX:
                 self._add_pd_enabled_subnet(ri, p['id'], p['subnet'])
             self._set_subnet_info(p)
             self.internal_network_added(ri, p)
@@ -504,7 +504,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
     def _add_pd_enabled_subnet(self, ri, port_id, subnet):
         # Some of the fields such as port_id and port_assigned are used with
         # L3 agent restart
-        pdo = {'prefix': '::/64',
+        pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
                'port_id': port_id,
                'port_assigned': False,
                'client_run': False}
@@ -518,7 +518,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         # with ip addresses.
         for p in update_ports:
             subnet_id = p['subnet']['id']
-            if (p['subnet']['cidr'] != '::/64' and
+            if (p['subnet']['cidr'] != l3_constants.TEMP_PD_PREFIX and
                 subnet_id in ri.pd_enabled_subnet and
                 not ri.pd_enabled_subnet[subnet_id]['port_assigned']):
                 self.internal_network_updated(ri, p)
@@ -1006,7 +1006,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                              namespace=ns_name,
                              prefix=prefix)
 
-        if not is_ha and internal_cidr != '::/64':
+        if not is_ha and internal_cidr != l3_constants.TEMP_PD_PREFIX:
             self.driver.init_l3(interface_name, [internal_cidr],
                                 namespace=ns_name)
             ip_address = internal_cidr.split('/')[0]
