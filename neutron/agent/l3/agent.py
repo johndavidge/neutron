@@ -22,6 +22,7 @@ from oslo import messaging
 from oslo.utils import excutils
 from oslo.utils import importutils
 from oslo.utils import timeutils
+import signal
 
 from neutron.agent.common import config
 from neutron.agent.l3 import dvr
@@ -31,6 +32,7 @@ from neutron.agent.l3 import router_info
 from neutron.agent.l3 import router_processing_queue as queue
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ra
+from neutron.agent.linux import pd
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.agent import rpc as agent_rpc
 from neutron.common import constants as l3_constants
@@ -118,6 +120,11 @@ class L3PluginApi(object):
         """Make a call to get the list of activated services."""
         cctxt = self.client.prepare(version='1.3')
         return cctxt.call(context, 'get_service_plugin_list')
+
+    def send_prefix_update(self, context, prefix_update):
+        """Send prefix update whenever prefixes get changed."""
+        cctxt = self.client.prepare(version='1.3')
+        return cctxt.call(context, 'process_prefix_update')
 
 
 class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
@@ -409,10 +416,15 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                      p['id'] not in existing_port_ids]
         old_ports = [p for p in ri.internal_ports if
                      p['id'] not in current_port_ids]
+        update_ports = [p for p in internal_ports if
+                        p['id'] in current_port_ids and
+                        p['id'] in existing_port_ids]
 
         new_ipv6_port = False
         old_ipv6_port = False
         for p in new_ports:
+            if p['subnet']['cidr'] == '::/64':
+                self._add_pd_enabled_subnet(ri, p['id'], p['subnet'])
             self._set_subnet_info(p)
             self.internal_network_added(ri, p)
             ri.internal_ports.append(p)
@@ -421,7 +433,9 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     netaddr.IPNetwork(p['subnet']['cidr']).version == 6):
                 new_ipv6_port = True
 
+        old_pd_enabled_subnet = []
         for p in old_ports:
+            old_pd_enabled_subnet.append(p['subnet']['id'])
             self.internal_network_removed(ri, p)
             ri.internal_ports.remove(p)
             if (not old_ipv6_port and
@@ -436,6 +450,9 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                               self.get_internal_device_name,
                               self.root_helper)
 
+        # Process PD
+        self._process_pd(ri, update_ports, old_pd_enabled_subnet)
+
         existing_devices = self._get_existing_devices(ri)
         current_internal_devs = set([n for n in existing_devices
                                      if n.startswith(INTERNAL_DEV_PREFIX)])
@@ -448,6 +465,49 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             self.driver.unplug(stale_dev,
                                namespace=ri.ns_name,
                                prefix=INTERNAL_DEV_PREFIX)
+
+    def _add_pd_enabled_subnet(self, ri, port_id, subnet):
+        # Some of the fields such as port_id and port_assigned are used with
+        # L3 agent restart
+        pdo = {'prefix': '::/64',
+               'port_id': port_id,
+               'port_assigned': False,
+               'client_run': False}
+        ri.pd_enabled_subnet[subnet['id']] = pdo
+
+    def _remove_pd_enabled_subnet(self, ri, subnet_id):
+        del ri.pd_enabled_subnet[subnet_id]
+
+    def _process_pd(self, ri, update_ports, old_pd_enabled_subnet):
+        # When router port ip addresses become assigned, configure the ports
+        # with ip addresses.
+        for p in update_ports:
+            subnet_id = p['subnet']['id']
+            if (p['subnet']['cidr'] != '::/64' and
+                subnet_id in ri.pd_enabled_subnet and
+                not ri.pd_enabled_subnet[subnet_id]['port_assigned']):
+                self.internal_network_updated(ri, p)
+                ri.pd_enabled_subnet[subnet_id]['port_assigned'] = True
+
+        # PD enabled subnet removed.
+        for subnet_id in old_pd_enabled_subnet:
+            if subnet_id in ri.pd_enabled_subnet:
+                pdo = ri.pd_enabled_subnet[subnet_id]
+                if pdo['client_run']:
+                    pd.disable_ipv6_pd(ri.router_id, ri.ns_name,
+                                       subnet_id, self.root_helper)
+                self._remove_pd_enabled_subnet(ri, subnet_id)
+
+        ex_gw_ifname = self._get_external_device_interface_name(
+                                ri, self._get_ex_gw_port(ri))
+
+        # PD enabled subent added.
+        for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
+            if not pdo['client_run']:
+                pd.enable_ipv6_pd(ri.router_id, ri.ns_name,
+                                  subnet_id, self.root_helper,
+                                  ex_gw_ifname)
+                pdo['client_run'] = True
 
     def _process_external_gateway(self, ri):
         ex_gw_port = self._get_ex_gw_port(ri)
@@ -861,7 +921,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                              namespace=ns_name,
                              prefix=prefix)
 
-        if not is_ha:
+        if not is_ha and internal_cidr != '::/64':
             self.driver.init_l3(interface_name, [internal_cidr],
                                 namespace=ns_name)
             ip_address = internal_cidr.split('/')[0]
@@ -870,6 +930,13 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                                        ip_address,
                                        self.conf.send_arp_for_ha,
                                        self.root_helper)
+
+    def internale_network_updated(self, ri, port):
+        port_id = port['id']
+        internal_cidr = port['ip_cidr']
+
+        interface_name = self.get_internal_device_name(port_id)
+        self.driver.init_l3(interface_name, [internal_cidr], ri.ns_name)
 
     def internal_network_added(self, ri, port):
         network_id = port['network_id']
@@ -1132,6 +1199,23 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         LOG.info(_LI("L3 agent started"))
         # When L3 agent is ready, we immediately do a full sync
         self.periodic_sync_routers_task(self.context)
+
+        LOG.debug('SIGHUP signal handler set')
+        signal.signal(signal.SIGHUP, self._handle_sighup)
+
+    def _handle_sighup(self, signum, frame):
+        LOG.debug('SIGHUP called')
+        prefix_update = {}
+        for router_id, ri in self.router_info.iteritems():
+            for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
+                if pdo['client_run']:
+                    prefix = pd.get_prefix(subnet_id)
+                    if prefix != pdo['prefix']:
+                        pdo['prefix'] = prefix
+                        prefix_update[subnet_id] = prefix
+        LOG.debug("Update server with prefixes: %s", prefix_update)
+        #if prefix_update:
+        #    self.plugin_rpc.send_prefix_update(self.context, prefix_update)
 
     def _update_routing_table(self, ri, operation, route):
         cmd = ['ip', 'route', operation, 'to', route['destination'],

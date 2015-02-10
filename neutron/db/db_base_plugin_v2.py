@@ -431,29 +431,35 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 subnet_id = subnet['id']
 
             if 'ip_address' in fixed:
-                # Ensure that the IP's are unique
-                if not NeutronDbPluginV2._check_unique_ip(context, network_id,
-                                                          subnet_id,
-                                                          fixed['ip_address']):
-                    raise n_exc.IpAddressInUse(net_id=network_id,
-                                               ip_address=fixed['ip_address'])
+                # Ignore temporary Prefix Delegation CIDRs
+                if not subnet['cidr'] == '::/64':
+                    # Ensure that the IP's are unique
+                    if not NeutronDbPluginV2._check_unique_ip(
+                                             context,
+                                             network_id,
+                                             subnet_id,
+                                             fixed['ip_address']):
+                        raise n_exc.IpAddressInUse(
+                                    net_id=network_id,
+                                    ip_address=fixed['ip_address'])
 
-                # Ensure that the IP is valid on the subnet
-                if (not found and
-                    not self._check_subnet_ip(subnet['cidr'],
-                                              fixed['ip_address'])):
-                    msg = _('IP address %s is not a valid IP for the defined '
-                            'subnet') % fixed['ip_address']
-                    raise n_exc.InvalidInput(error_message=msg)
-                if (ipv6_utils.is_auto_address_subnet(subnet) and
-                    device_owner not in
-                        constants.ROUTER_INTERFACE_OWNERS):
-                    msg = (_("IPv6 address %(address)s can not be directly "
-                            "assigned to a port on subnet %(id)s since the "
-                            "subnet is configured for automatic addresses") %
-                           {'address': fixed['ip_address'],
-                            'id': subnet_id})
-                    raise n_exc.InvalidInput(error_message=msg)
+                    # Ensure that the IP is valid on the subnet
+                    if (not found and
+                        not self._check_subnet_ip(subnet['cidr'],
+                                                  fixed['ip_address'])):
+                        msg = _('IP address %s is not a valid IP for the '
+                                'defined subnet') % fixed['ip_address']
+                        raise n_exc.InvalidInput(error_message=msg)
+                    if (ipv6_utils.is_auto_address_subnet(subnet) and
+                        device_owner not in
+                            constants.ROUTER_INTERFACE_OWNERS):
+                        msg = (_("IPv6 address %(address)s can not be "
+                                 "directly assigned to a port on subnet "
+                                 "%(id)s since the subnet is configured for "
+                                 "automatic addresses") %
+                               {'address': fixed['ip_address'],
+                                'id': subnet_id})
+                        raise n_exc.InvalidInput(error_message=msg)
                 fixed_ip_set.append({'subnet_id': subnet_id,
                                      'ip_address': fixed['ip_address']})
             else:
@@ -1077,6 +1083,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
         s = subnet['subnet']
 
+        # Allow for temporary CIDRs used for Prefix Delegation
+        # Make sure gateway_ip is None
+        if subnet['subnet']['cidr'] == '::/64':
+            s['gateway_ip'] = None
+
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
             s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
 
@@ -1093,7 +1104,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         tenant_id = self._get_tenant_id_for_create(context, s)
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, s["network_id"])
-            self._validate_subnet_cidr(context, network, s['cidr'])
+            # Do not check for CIDR overlap if subnet has a temp
+            # Prefix Delegation CIDR
+            if subnet['subnet']['cidr'] != '::/64':
+                self._validate_subnet_cidr(context, network, s['cidr'])
             # The 'shared' attribute for subnets is for internal plugin
             # use only. It is not exposed through the API
             args = {'tenant_id': tenant_id,
