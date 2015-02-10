@@ -500,7 +500,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 self._remove_pd_enabled_subnet(ri, subnet_id)
 
         ex_gw_ifname = self._get_external_device_interface_name(
-                                ri, self._get_ex_gw_port(ri))
+                                ri, self._get_ex_gw_port(ri), None)
 
         # PD enabled subent added.
         for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
