@@ -12,12 +12,13 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
+import errno
 import itertools
 import os
 import stat
 
 import netaddr
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
@@ -79,12 +80,16 @@ class InvalidAuthenticationTypeExecption(exceptions.NeutronException):
 class KeepalivedVipAddress(object):
     """A virtual address entry of a keepalived configuration."""
 
-    def __init__(self, ip_address, interface_name):
+    def __init__(self, ip_address, interface_name, scope=None):
         self.ip_address = ip_address
         self.interface_name = interface_name
+        self.scope = scope
 
     def build_config(self):
-        return '%s dev %s' % (self.ip_address, self.interface_name)
+        result = '%s dev %s' % (self.ip_address, self.interface_name)
+        if self.scope:
+            result += ' scope %s' % self.scope
+        return result
 
 
 class KeepalivedVirtualRoute(object):
@@ -150,7 +155,7 @@ class KeepalivedInstance(object):
         self.track_interfaces = []
         self.vips = []
         self.virtual_routes = []
-        self.authentication = tuple()
+        self.authentication = None
         metadata_cidr = '169.254.169.254/32'
         self.primary_vip_range = get_free_range(
             parent_range='169.254.0.0/16',
@@ -165,8 +170,8 @@ class KeepalivedInstance(object):
 
         self.authentication = (auth_type, password)
 
-    def add_vip(self, ip_cidr, interface_name):
-        self.vips.append(KeepalivedVipAddress(ip_cidr, interface_name))
+    def add_vip(self, ip_cidr, interface_name, scope):
+        self.vips.append(KeepalivedVipAddress(ip_cidr, interface_name, scope))
 
     def remove_vips_vroutes_by_interface(self, interface_name):
         self.vips = [vip for vip in self.vips
@@ -178,6 +183,10 @@ class KeepalivedInstance(object):
     def remove_vip_by_ip_address(self, ip_address):
         self.vips = [vip for vip in self.vips
                      if vip.ip_address != ip_address]
+
+    def get_existing_vip_ip_addresses(self, interface_name):
+        return [vip.ip_address for vip in self.vips
+                if vip.interface_name == interface_name]
 
     def _build_track_interface_config(self):
         return itertools.chain(
@@ -385,15 +394,23 @@ class KeepalivedManager(KeepalivedNotifierMixin):
 
         return config_path
 
+    def get_conf_on_disk(self):
+        config_path = self._get_full_config_file_path('keepalived.conf')
+        try:
+            with open(config_path) as conf:
+                return conf.read()
+        except (OSError, IOError) as e:
+            if e.errno != errno.ENOENT:
+                raise
+
     def spawn(self):
         config_path = self._output_config_file()
 
-        self.process = external_process.ProcessManager(
-            self.conf,
-            self.resource_id,
-            self.root_helper,
-            self.namespace,
-            pids_path=self.conf_path)
+        self.process = self.get_process(self.conf,
+                                        self.resource_id,
+                                        self.root_helper,
+                                        self.namespace,
+                                        self.conf_path)
 
         def callback(pid_file):
             cmd = ['keepalived', '-P',
@@ -402,7 +419,7 @@ class KeepalivedManager(KeepalivedNotifierMixin):
                    '-r', '%s-vrrp' % pid_file]
             return cmd
 
-        self.process.enable(callback)
+        self.process.enable(callback, reload_cfg=True)
 
         self.spawned = True
         LOG.debug('Keepalived spawned with config %s', config_path)
@@ -432,3 +449,12 @@ class KeepalivedManager(KeepalivedNotifierMixin):
     def revive(self):
         if self.spawned and not self.process.active:
             self.restart()
+
+    @classmethod
+    def get_process(cls, conf, resource_id, root_helper, namespace, conf_path):
+        return external_process.ProcessManager(
+            conf,
+            resource_id,
+            root_helper,
+            namespace,
+            pids_path=conf_path)

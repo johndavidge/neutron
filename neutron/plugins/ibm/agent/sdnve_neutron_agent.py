@@ -22,8 +22,8 @@ import time
 import eventlet
 eventlet.monkey_patch()
 
-from oslo.config import cfg
-from oslo import messaging
+from oslo_config import cfg
+import oslo_messaging
 
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ovs_lib
@@ -53,7 +53,7 @@ class SdnvePluginApi(agent_rpc.PluginApi):
 
 class SdnveNeutronAgent(object):
 
-    target = messaging.Target(version='1.1')
+    target = oslo_messaging.Target(version='1.1')
 
     def __init__(self, integ_br, interface_mappings,
                  info, root_helper, polling_interval,
@@ -146,7 +146,7 @@ class SdnveNeutronAgent(object):
             if out_of_band:
                 LOG.debug("info_update received. New controller"
                           "is set to be out of band")
-                self.int_br.set_db_attribute("controller",
+                self.int_br.set_db_attribute("Controller",
                                              self.int_bridge_name,
                                              "connection-mode",
                                              "out-of-band")
@@ -175,7 +175,7 @@ class SdnveNeutronAgent(object):
         if controller_ip:
             int_br.set_controller(["tcp:" + controller_ip])
         if out_of_band:
-            int_br.set_db_attribute("controller", bridge_name,
+            int_br.set_db_attribute("Controller", bridge_name,
                                     "connection-mode", "out-of-band")
 
         return int_br

@@ -15,7 +15,7 @@
 
 import os
 
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.common import config
 from neutron.openstack.common import log as logging
@@ -53,6 +53,15 @@ USE_NAMESPACES_OPTS = [
 IPTABLES_OPTS = [
     cfg.BoolOpt('comment_iptables_rules', default=True,
                 help=_("Add comments to iptables rules.")),
+]
+
+PROCESS_MONITOR_OPTS = [
+    cfg.StrOpt('check_child_processes_action', default='respawn',
+               choices=['respawn', 'exit'],
+               help=_('Action to be executed when a child process dies')),
+    cfg.IntOpt('check_child_processes_interval', default=0,
+               help=_('Interval between checks of child process liveness '
+                      '(seconds), use 0 to disable')),
 ]
 
 
@@ -103,6 +112,10 @@ def register_use_namespaces_opts_helper(conf):
 
 def register_iptables_opts(conf):
     conf.register_opts(IPTABLES_OPTS, 'AGENT')
+
+
+def register_process_monitor_opts(conf):
+    conf.register_opts(PROCESS_MONITOR_OPTS, 'AGENT')
 
 
 def get_root_helper(conf):

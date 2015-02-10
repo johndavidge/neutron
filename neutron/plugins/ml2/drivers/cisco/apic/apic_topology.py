@@ -20,8 +20,9 @@ import eventlet
 
 eventlet.monkey_patch()
 
-from oslo.config import cfg
-from oslo import messaging
+from oslo_concurrency import lockutils
+from oslo_config import cfg
+import oslo_messaging
 
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
@@ -32,7 +33,6 @@ from neutron.common import utils as neutron_utils
 from neutron.db import agents_db
 from neutron.i18n import _LE, _LI
 from neutron import manager
-from neutron.openstack.common import lockutils
 from neutron.openstack.common import log as logging
 from neutron.openstack.common import periodic_task
 from neutron.openstack.common import service as svc
@@ -58,7 +58,7 @@ LOG = logging.getLogger(__name__)
 
 class ApicTopologyService(manager.Manager):
 
-    target = messaging.Target(version='1.1')
+    target = oslo_messaging.Target(version='1.1')
 
     def __init__(self, host=None):
         if host is None:
@@ -142,7 +142,7 @@ class ApicTopologyService(manager.Manager):
 class ApicTopologyServiceNotifierApi(object):
 
     def __init__(self):
-        target = messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.0')
+        target = oslo_messaging.Target(topic=TOPIC_APIC_SERVICE, version='1.0')
         self.client = rpc.get_client(target)
 
     def update_link(self, context, host, interface, mac, switch, module, port):

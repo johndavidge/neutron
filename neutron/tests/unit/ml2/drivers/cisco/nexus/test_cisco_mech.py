@@ -96,13 +96,13 @@ class CiscoML2MechanismTestCase(test_ml2_plugin.Ml2PluginV2TestCase):
         # Mock port context values for bound_segments and 'status'.
         self.mock_bound_segment = mock.patch.object(
             driver_context.PortContext,
-            'bound_segment',
+            'bottom_bound_segment',
             new_callable=mock.PropertyMock).start()
         self.mock_bound_segment.return_value = BOUND_SEGMENT1
 
         self.mock_original_bound_segment = mock.patch.object(
             driver_context.PortContext,
-            'original_bound_segment',
+            'original_bottom_bound_segment',
             new_callable=mock.PropertyMock).start()
         self.mock_original_bound_segment.return_value = None
 
@@ -559,16 +559,16 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
         The first one should only change the current host_id and remove the
         binding resulting in the mechanism drivers receiving:
           PortContext.original['binding:host_id']: previous value
-          PortContext.original_bound_segment: previous value
+          PortContext.original_bottom_bound_segment: previous value
           PortContext.current['binding:host_id']: current (new) value
-          PortContext.bound_segment: None
+          PortContext.bottom_bound_segment: None
 
         The second one binds the new host resulting in the mechanism
         drivers receiving:
           PortContext.original['binding:host_id']: previous value
-          PortContext.original_bound_segment: None
+          PortContext.original_bottom_bound_segment: None
           PortContext.current['binding:host_id']: previous value
-          PortContext.bound_segment: new value
+          PortContext.bottom_bound_segment: new value
         """
 
         # Create network, subnet and port.
@@ -699,6 +699,15 @@ class TestCiscoPortsV2(CiscoML2MechanismTestCase,
                                     expected_failure=True) as result:
             self._assertExpectedHTTP(result.status_int,
                                      c_exc.NexusMissingRequiredFields)
+
+    def test_update_port_mac(self):
+        # REVISIT: test passes, but is back-end OK?
+        host_arg = {
+            portbindings.HOST_ID: COMP_HOST_NAME,
+            'device_id': DEVICE_ID_1,
+        }
+        arg_list = (portbindings.HOST_ID, 'device_id',)
+        self.check_update_port_mac(host_arg=host_arg, arg_list=arg_list)
 
 
 class TestCiscoNetworksV2(CiscoML2MechanismTestCase,

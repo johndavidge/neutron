@@ -14,7 +14,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
+from oslo_config import cfg
 
 from midonet.neutron import plugin
 
@@ -28,7 +28,7 @@ midonet_opts = [
                help=_('MidoNet admin password.')),
     cfg.StrOpt('project_id',
                default='77777777-7777-7777-7777-777777777777',
-               help=_('ID of the project that MidoNet admin user'
+               help=_('ID of the project that MidoNet admin user '
                       'belongs to.'))
 ]
 

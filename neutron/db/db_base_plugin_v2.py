@@ -13,11 +13,10 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import random
-
 import netaddr
-from oslo.config import cfg
-from oslo.utils import excutils
+from oslo_config import cfg
+from oslo_db import exception as db_exc
+from oslo_utils import excutils
 from sqlalchemy import and_
 from sqlalchemy import event
 from sqlalchemy import orm
@@ -27,6 +26,7 @@ from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
 from neutron.common import ipv6_utils
+from neutron.common import utils
 from neutron import context as ctx
 from neutron.db import common_db_mixin
 from neutron.db import models_v2
@@ -82,12 +82,6 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             event.listen(models_v2.Port.status, 'set',
                          self.nova_notifier.record_port_status_changed)
 
-    @classmethod
-    def register_dict_extend_funcs(cls, resource, funcs):
-        cur_funcs = cls._dict_extend_functions.get(resource, [])
-        cur_funcs.extend(funcs)
-        cls._dict_extend_functions[resource] = cur_funcs
-
     def _get_network(self, context, id):
         try:
             network = self._get_by_id(context, models_v2.Network, id)
@@ -127,41 +121,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         return context.session.query(models_v2.Subnet).all()
 
     @staticmethod
-    def _generate_mac(context, network_id):
-        base_mac = cfg.CONF.base_mac.split(':')
-        max_retries = cfg.CONF.mac_generation_retries
-        for i in range(max_retries):
-            mac = [int(base_mac[0], 16), int(base_mac[1], 16),
-                   int(base_mac[2], 16), random.randint(0x00, 0xff),
-                   random.randint(0x00, 0xff), random.randint(0x00, 0xff)]
-            if base_mac[3] != '00':
-                mac[3] = int(base_mac[3], 16)
-            mac_address = ':'.join(map(lambda x: "%02x" % x, mac))
-            if NeutronDbPluginV2._check_unique_mac(context, network_id,
-                                                   mac_address):
-                LOG.debug("Generated mac for network %(network_id)s "
-                          "is %(mac_address)s",
-                          {'network_id': network_id,
-                           'mac_address': mac_address})
-                return mac_address
-            else:
-                LOG.debug("Generated mac %(mac_address)s exists. Remaining "
-                          "attempts %(max_retries)s.",
-                          {'mac_address': mac_address,
-                           'max_retries': max_retries - (i + 1)})
-        LOG.error(_LE("Unable to generate mac address after %s attempts"),
-                  max_retries)
-        raise n_exc.MacAddressGenerationFailure(net_id=network_id)
-
-    @staticmethod
-    def _check_unique_mac(context, network_id, mac_address):
-        mac_qry = context.session.query(models_v2.Port)
-        try:
-            mac_qry.filter_by(network_id=network_id,
-                              mac_address=mac_address).one()
-        except exc.NoResultFound:
-            return True
-        return False
+    def _generate_mac():
+        return utils.get_random_mac(cfg.CONF.base_mac.split(':'))
 
     @staticmethod
     def _delete_ip_allocation(context, network_id, subnet_id, ip_address):
@@ -558,32 +519,30 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             subnets = self.get_subnets(context, filters=filter)
             # Split into v4 and v6 subnets
             v4 = []
-            v6 = []
+            v6_stateful = []
+            v6_stateless = []
             for subnet in subnets:
                 if subnet['ip_version'] == 4:
                     v4.append(subnet)
                 else:
-                    v6.append(subnet)
-            for subnet in v6:
-                if ipv6_utils.is_auto_address_subnet(subnet):
-                    #(dzyu) If true, calculate an IPv6 address
-                    # by mac address and prefix, then remove this
-                    # subnet from the array of subnets that will be passed
-                    # to the _generate_ip() function call, since we just
-                    # generated an IP.
-                    prefix = subnet['cidr']
-                    ip_address = ipv6_utils.get_ipv6_addr_by_EUI64(
-                        prefix, p['mac_address'])
-                    if not self._check_unique_ip(
-                        context, p['network_id'],
-                        subnet['id'], ip_address.format()):
-                        raise n_exc.IpAddressInUse(
-                            net_id=p['network_id'],
-                            ip_address=ip_address.format())
-                    ips.append({'ip_address': ip_address.format(),
-                                'subnet_id': subnet['id']})
-                    v6.remove(subnet)
-            version_subnets = [v4, v6]
+                    if ipv6_utils.is_auto_address_subnet(subnet):
+                        v6_stateless.append(subnet)
+                    else:
+                        v6_stateful.append(subnet)
+
+            for subnet in v6_stateless:
+                prefix = subnet['cidr']
+                ip_address = ipv6_utils.get_ipv6_addr_by_EUI64(
+                    prefix, p['mac_address'])
+                if not self._check_unique_ip(
+                    context, p['network_id'],
+                    subnet['id'], ip_address.format()):
+                    raise n_exc.IpAddressInUse(
+                        net_id=p['network_id'],
+                        ip_address=ip_address.format())
+                ips.append({'ip_address': ip_address.format(),
+                            'subnet_id': subnet['id']})
+            version_subnets = [v4, v6_stateful]
             for subnets in version_subnets:
                 if subnets:
                     result = NeutronDbPluginV2._generate_ip(context, subnets)
@@ -1272,6 +1231,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             result['allocation_pools'] = new_pools
         return result
 
+    def _subnet_check_ip_allocations(self, context, subnet_id):
+        return context.session.query(
+            models_v2.IPAllocation).filter_by(
+                subnet_id=subnet_id).join(models_v2.Port).first()
+
     def delete_subnet(self, context, id):
         with context.session.begin(subtransactions=True):
             subnet = self._get_subnet(context, id)
@@ -1291,13 +1255,17 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             network_ports = qry_network_ports.all()
             if network_ports:
                 map(context.session.delete, network_ports)
-            # Check if there are tenant owned ports
-            tenant_ports = (context.session.query(models_v2.IPAllocation).
-                            filter_by(subnet_id=subnet['id']).
-                            join(models_v2.Port).
-                            filter_by(network_id=subnet['network_id']).first())
-            if tenant_ports:
-                raise n_exc.SubnetInUse(subnet_id=id)
+            # Check if there are more IP allocations, unless
+            # is_auto_address_subnet is True. In that case the check is
+            # unnecessary. This additional check not only would be wasteful
+            # for this class of subnet, but is also error-prone since when
+            # the isolation level is set to READ COMMITTED allocations made
+            # concurrently will be returned by this query
+            if not is_auto_addr_subnet:
+                if self._subnet_check_ip_allocations(context, id):
+                    LOG.debug("Found IP allocations on subnet %s, "
+                              "cannot delete", id)
+                    raise n_exc.SubnetInUse(subnet_id=id)
 
             context.session.delete(subnet)
 
@@ -1321,8 +1289,44 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         return self._get_collection_count(context, models_v2.Subnet,
                                           filters=filters)
 
+    def _check_mac_addr_update(self, context, port, new_mac, device_owner):
+        if (device_owner and device_owner.startswith('network:')):
+            raise n_exc.UnsupportedPortDeviceOwner(
+                op=_("mac address update"), port_id=id,
+                device_owner=device_owner)
+
     def create_port_bulk(self, context, ports):
         return self._create_bulk('port', context, ports)
+
+    def _create_port_with_mac(self, context, network_id, port_data,
+                              mac_address, nested=False):
+        try:
+            with context.session.begin(subtransactions=True, nested=nested):
+                db_port = models_v2.Port(mac_address=mac_address, **port_data)
+                context.session.add(db_port)
+                return db_port
+        except db_exc.DBDuplicateEntry:
+            raise n_exc.MacAddressInUse(net_id=network_id, mac=mac_address)
+
+    def _create_port(self, context, network_id, port_data):
+        max_retries = cfg.CONF.mac_generation_retries
+        for i in range(max_retries):
+            mac = self._generate_mac()
+            try:
+                # nested = True frames an operation that may potentially fail
+                # within a transaction, so that it can be rolled back to the
+                # point before its failure while maintaining the enclosing
+                # transaction
+                return self._create_port_with_mac(
+                    context, network_id, port_data, mac, nested=True)
+            except n_exc.MacAddressInUse:
+                LOG.debug('Generated mac %(mac_address)s exists on '
+                          'network %(network_id)s',
+                          {'mac_address': mac, 'network_id': network_id})
+
+        LOG.error(_LE("Unable to generate mac address after %s attempts"),
+                  max_retries)
+        raise n_exc.MacAddressGenerationFailure(net_id=network_id)
 
     def create_port(self, context, port):
         p = port['port']
@@ -1331,45 +1335,30 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         # NOTE(jkoelker) Get the tenant_id outside of the session to avoid
         #                unneeded db action if the operation raises
         tenant_id = self._get_tenant_id_for_create(context, p)
-        if p.get('device_owner') == constants.DEVICE_OWNER_ROUTER_INTF:
-            self._enforce_device_owner_not_router_intf_or_device_id(context, p,
-                                                                    tenant_id)
+        if p.get('device_owner'):
+            self._enforce_device_owner_not_router_intf_or_device_id(
+                context, p.get('device_owner'), p.get('device_id'), tenant_id)
+
+        port_data = dict(tenant_id=tenant_id,
+                         name=p['name'],
+                         id=port_id,
+                         network_id=network_id,
+                         admin_state_up=p['admin_state_up'],
+                         status=p.get('status', constants.PORT_STATUS_ACTIVE),
+                         device_id=p['device_id'],
+                         device_owner=p['device_owner'])
 
         with context.session.begin(subtransactions=True):
             # Ensure that the network exists.
             self._get_network(context, network_id)
 
-            # Ensure that a MAC address is defined and it is unique on the
-            # network
+            # Create the port
             if p['mac_address'] is attributes.ATTR_NOT_SPECIFIED:
-                #Note(scollins) Add the generated mac_address to the port,
-                #since _allocate_ips_for_port will need the mac when
-                #calculating an EUI-64 address for a v6 subnet
-                p['mac_address'] = NeutronDbPluginV2._generate_mac(context,
-                                                                   network_id)
+                db_port = self._create_port(context, network_id, port_data)
+                p['mac_address'] = db_port['mac_address']
             else:
-                # Ensure that the mac on the network is unique
-                if not NeutronDbPluginV2._check_unique_mac(context,
-                                                           network_id,
-                                                           p['mac_address']):
-                    raise n_exc.MacAddressInUse(net_id=network_id,
-                                                mac=p['mac_address'])
-
-            if 'status' not in p:
-                status = constants.PORT_STATUS_ACTIVE
-            else:
-                status = p['status']
-
-            db_port = models_v2.Port(tenant_id=tenant_id,
-                                     name=p['name'],
-                                     id=port_id,
-                                     network_id=network_id,
-                                     mac_address=p['mac_address'],
-                                     admin_state_up=p['admin_state_up'],
-                                     status=status,
-                                     device_id=p['device_id'],
-                                     device_owner=p['device_owner'])
-            context.session.add(db_port)
+                db_port = self._create_port_with_mac(
+                    context, network_id, port_data, p['mac_address'])
 
             # Update the IP's for the port
             ips = self._allocate_ips_for_port(context, port)
@@ -1386,43 +1375,45 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         p = port['port']
 
         changed_ips = False
-        changed_device_id = False
         with context.session.begin(subtransactions=True):
             port = self._get_port(context, id)
-            if 'device_owner' in p:
-                current_device_owner = p['device_owner']
-                changed_device_owner = True
-            else:
-                current_device_owner = port['device_owner']
-                changed_device_owner = False
-            if p.get('device_id') != port['device_id']:
-                changed_device_id = True
+            changed_owner = 'device_owner' in p
+            current_owner = p.get('device_owner') or port['device_owner']
+            changed_device_id = p.get('device_id') != port['device_id']
+            current_device_id = p.get('device_id') or port['device_id']
 
-            # if the current device_owner is ROUTER_INF and the device_id or
-            # device_owner changed check device_id is not another tenants
-            # router
-            if ((current_device_owner == constants.DEVICE_OWNER_ROUTER_INTF)
-                    and (changed_device_id or changed_device_owner)):
+            if current_owner and changed_device_id or changed_owner:
                 self._enforce_device_owner_not_router_intf_or_device_id(
-                    context, p, port['tenant_id'], port)
+                    context, current_owner, current_device_id,
+                    port['tenant_id'])
+
+            new_mac = p.get('mac_address')
+            if new_mac and new_mac != port['mac_address']:
+                self._check_mac_addr_update(
+                    context, port, new_mac, current_owner)
 
             # Check if the IPs need to be updated
+            network_id = port['network_id']
             if 'fixed_ips' in p:
                 changed_ips = True
                 original = self._make_port_dict(port, process_extensions=False)
                 added_ips, prev_ips = self._update_ips_for_port(
-                    context, port["network_id"], id,
+                    context, network_id, id,
                     original["fixed_ips"], p['fixed_ips'],
                     original['mac_address'], port['device_owner'])
 
                 # Update ips if necessary
                 for ip in added_ips:
                     NeutronDbPluginV2._store_ip_allocation(
-                        context, ip['ip_address'], port['network_id'],
+                        context, ip['ip_address'], network_id,
                         ip['subnet_id'], port.id)
-            # Remove all attributes in p which are not in the port DB model
-            # and then update the port
-            port.update(self._filter_non_model_columns(p, models_v2.Port))
+                # Remove all attributes in p which are not in the port DB model
+                # and then update the port
+            try:
+                port.update(self._filter_non_model_columns(p, models_v2.Port))
+                context.session.flush()
+            except db_exc.DBDuplicateEntry:
+                raise n_exc.MacAddressInUse(net_id=network_id, mac=new_mac)
 
         result = self._make_port_dict(port)
         # Keep up with fields that changed
@@ -1505,16 +1496,15 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         return self._get_ports_query(context, filters).count()
 
     def _enforce_device_owner_not_router_intf_or_device_id(self, context,
-                                                           port_request,
-                                                           tenant_id,
-                                                           db_port=None):
+                                                           device_owner,
+                                                           device_id,
+                                                           tenant_id):
+        """Prevent tenants from replacing the device id of router ports with
+        a router uuid belonging to another tenant.
+        """
+        if device_owner not in constants.ROUTER_INTERFACE_OWNERS:
+            return
         if not context.is_admin:
-            # find the device_id. If the call was update_port and the
-            # device_id was not passed in we use the device_id from the
-            # db.
-            device_id = port_request.get('device_id')
-            if not device_id and db_port:
-                device_id = db_port.get('device_id')
             # check to make sure device_id does not match another tenants
             # router.
             if device_id:

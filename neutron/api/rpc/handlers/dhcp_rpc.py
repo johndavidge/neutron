@@ -16,10 +16,10 @@
 import itertools
 import operator
 
-from oslo.config import cfg
-from oslo.db import exception as db_exc
-from oslo import messaging
-from oslo.utils import excutils
+from oslo_config import cfg
+from oslo_db import exception as db_exc
+import oslo_messaging
+from oslo_utils import excutils
 
 from neutron.api.v2 import attributes
 from neutron.common import constants
@@ -39,7 +39,7 @@ class DhcpRpcCallback(object):
 
     This class implements the server side of an rpc interface.  The client
     side of this interface can be found in
-    neutron.agent.dhcp_agent.DhcpPluginApi.  For more information about
+    neutron.agent.dhcp.agent.DhcpPluginApi.  For more information about
     changing rpc interfaces, see doc/source/devref/rpc_api.rst.
     """
 
@@ -47,8 +47,9 @@ class DhcpRpcCallback(object):
     #     1.0 - Initial version.
     #     1.1 - Added get_active_networks_info, create_dhcp_port,
     #           and update_dhcp_port methods.
-    target = messaging.Target(namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
-                              version='1.1')
+    target = oslo_messaging.Target(
+        namespace=constants.RPC_NAMESPACE_DHCP_PLUGIN,
+        version='1.1')
 
     def _get_active_networks(self, context, **kwargs):
         """Retrieve and return a list of the active networks."""

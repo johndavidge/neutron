@@ -17,7 +17,7 @@
 import os
 
 import mock
-from oslo.config import cfg
+from oslo_config import cfg
 
 import neutron.common.test_lib as test_lib
 from neutron.plugins.bigswitch import config
@@ -57,6 +57,10 @@ class BigSwitchTestBase(object):
         cfg.CONF.set_override('add_meta_server_route', False, 'RESTPROXY')
 
     def setup_patches(self):
+        self.dhcp_periodic_p = mock.patch(
+            'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
+            'start_periodic_dhcp_agent_status_check')
+        self.patched_dhcp_periodic = self.dhcp_periodic_p.start()
         self.plugin_notifier_p = mock.patch(NOTIFIER)
         # prevent any greenthreads from spawning
         self.spawn_p = mock.patch(SPAWN, new=lambda *args, **kwargs: None)

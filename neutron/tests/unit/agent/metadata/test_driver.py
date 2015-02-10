@@ -17,7 +17,7 @@ import contextlib
 
 import mock
 
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.agent.common import config as agent_config
 from neutron.agent.l3 import config as l3_config
@@ -37,6 +37,7 @@ class TestMetadataDriver(base.BaseTestCase):
     def setUp(self):
         super(TestMetadataDriver, self).setUp()
         cfg.CONF.register_opts(l3_config.OPTS)
+        cfg.CONF.register_opts(metadata_driver.MetadataDriver.OPTS)
         agent_config.register_root_helper(cfg.CONF)
 
     def test_metadata_nat_rules(self):
@@ -47,10 +48,20 @@ class TestMetadataDriver(base.BaseTestCase):
             metadata_driver.MetadataDriver.metadata_nat_rules(8775))
 
     def test_metadata_filter_rules(self):
-        rules = ('INPUT', '-s 0.0.0.0/0 -p tcp -m tcp --dport 8775 -j ACCEPT')
+        rules = [('INPUT', '-m mark --mark 0x1 -j ACCEPT'),
+                 ('INPUT', '-s 0.0.0.0/0 -p tcp -m tcp --dport 8775 -j DROP')]
         self.assertEqual(
-            [rules],
-            metadata_driver.MetadataDriver.metadata_filter_rules(8775))
+            rules,
+            metadata_driver.MetadataDriver.metadata_filter_rules(8775, '0x1'))
+
+    def test_metadata_mangle_rules(self):
+        rule = ('PREROUTING', '-s 0.0.0.0/0 -d 169.254.169.254/32 '
+                '-p tcp -m tcp --dport 80 '
+                '-j MARK --set-xmark 0x1/%s' %
+                metadata_driver.METADATA_ACCESS_MARK_MASK)
+        self.assertEqual(
+            [rule],
+            metadata_driver.MetadataDriver.metadata_mangle_rules('0x1'))
 
     def _test_spawn_metadata_proxy(self, expected_user, expected_group,
                                    user='', group=''):

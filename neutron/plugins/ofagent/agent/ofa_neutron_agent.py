@@ -23,8 +23,8 @@
 import time
 
 import netaddr
-from oslo.config import cfg
-from oslo import messaging
+from oslo_config import cfg
+import oslo_messaging
 from ryu.app.ofctl import api as ryu_api
 from ryu.base import app_manager
 from ryu.controller import handler
@@ -123,19 +123,6 @@ class Bridge(flows.OFAgentIntegrationBridge, ovs_lib.OVSBridge):
         self.get_datapath(retry_max)
 
 
-class OFAPluginApi(agent_rpc.PluginApi,
-                   sg_rpc.SecurityGroupServerRpcApiMixin):
-    pass
-
-
-class OFASecurityGroupAgent(sg_rpc.SecurityGroupAgentRpcMixin):
-    def __init__(self, context, plugin_rpc, root_helper):
-        self.context = context
-        self.plugin_rpc = plugin_rpc
-        self.root_helper = root_helper
-        self.init_firewall(defer_refresh_firewall=True)
-
-
 class OFANeutronAgentRyuApp(app_manager.RyuApp):
     OFP_VERSIONS = [ryu_ofp13.OFP_VERSION]
 
@@ -190,7 +177,7 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     # history
     #   1.0 Initial version
     #   1.1 Support Security Group RPC
-    target = messaging.Target(version='1.1')
+    target = oslo_messaging.Target(version='1.1')
 
     def __init__(self, ryuapp, integ_br, local_ip,
                  bridge_mappings, interface_mappings, root_helper,
@@ -258,9 +245,9 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         self.dont_fragment = cfg.CONF.AGENT.dont_fragment
 
         # Security group agent support
-        self.sg_agent = OFASecurityGroupAgent(self.context,
-                                              self.plugin_rpc,
-                                              self.root_helper)
+        self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
+                self.sg_plugin_rpc, self.root_helper,
+                defer_refresh_firewall=True)
         # Initialize iteration counter
         self.iter_num = 0
 
@@ -287,7 +274,8 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         mac = self.int_br.get_local_port_mac()
         self.agent_id = '%s%s' % ('ovs', (mac.replace(":", "")))
         self.topic = topics.AGENT
-        self.plugin_rpc = OFAPluginApi(topics.PLUGIN)
+        self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
+        self.sg_plugin_rpc = sg_rpc.SecurityGroupServerRpcApi(topics.PLUGIN)
         self.state_rpc = agent_rpc.PluginReportStateAPI(topics.PLUGIN)
 
         # RPC network init

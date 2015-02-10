@@ -17,9 +17,9 @@ import datetime
 import httplib
 
 import eventlet
-from oslo.config import cfg
-from oslo.utils import excutils
-from oslo.utils import timeutils
+from oslo_config import cfg
+from oslo_utils import excutils
+from oslo_utils import timeutils
 
 from neutron import context as ctx
 from neutron.extensions import portbindings
@@ -127,7 +127,7 @@ class BigSwitchMechanismDriver(plugin.NeutronRestProxyV2Base,
         port = copy.deepcopy(context.current)
         net = context.network.current
         port['network'] = net
-        port['bound_segment'] = context.bound_segment
+        port['bound_segment'] = context.top_bound_segment
         actx = ctx.get_admin_context()
         prepped_port = self._extend_port_dict_binding(actx, port)
         prepped_port = self._map_state_and_status(prepped_port)
@@ -151,7 +151,7 @@ class BigSwitchMechanismDriver(plugin.NeutronRestProxyV2Base,
             # TODO(kevinbenton): check controller to see if the port exists
             # so this driver can be run in parallel with others that add
             # support for external port bindings
-            for segment in context.network.network_segments:
+            for segment in context.segments_to_bind:
                 if segment[api.NETWORK_TYPE] == pconst.TYPE_VLAN:
                     context.set_binding(
                         segment[api.ID], portbindings.VIF_TYPE_BRIDGE,
@@ -161,7 +161,7 @@ class BigSwitchMechanismDriver(plugin.NeutronRestProxyV2Base,
 
         # IVS hosts will have a vswitch with the same name as the hostname
         if self.does_vswitch_exist(context.host):
-            for segment in context.network.network_segments:
+            for segment in context.segments_to_bind:
                 if segment[api.NETWORK_TYPE] == pconst.TYPE_VLAN:
                     context.set_binding(
                         segment[api.ID], portbindings.VIF_TYPE_IVS,
@@ -183,15 +183,11 @@ class BigSwitchMechanismDriver(plugin.NeutronRestProxyV2Base,
             pass
 
         try:
-            self.servers.rest_get_switch(host)
-            exists = True
-        except servermanager.RemoteRestError as e:
-            if e.status == 404:
-                exists = False
-            else:
-                # Another error, return without caching to try again on
-                # next binding
-                return
+            exists = bool(self.servers.rest_get_switch(host))
+        except servermanager.RemoteRestError:
+            # Connectivity or internal server error. Skip cache to try again on
+            # next binding attempt
+            return
         self.ivs_host_cache[host] = {
             'timestamp': datetime.datetime.now(),
             'exists': exists

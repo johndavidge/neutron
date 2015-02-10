@@ -17,15 +17,14 @@ import contextlib
 
 import collections
 import mock
-from oslo.config import cfg
-from oslo import messaging
+from oslo_config import cfg
+import oslo_messaging
 from testtools import matchers
 import webob.exc
 
 from neutron.agent.common import config
 from neutron.agent import firewall as firewall_base
 from neutron.agent.linux import iptables_manager
-from neutron.agent import rpc as agent_rpc
 from neutron.agent import securitygroups_rpc as sg_rpc
 from neutron.api.rpc.handlers import securitygroups_rpc
 from neutron.common import constants as const
@@ -1113,10 +1112,8 @@ class SGAgentRpcCallBackMixinTestCase(base.BaseTestCase):
 class SecurityGroupAgentRpcTestCaseForNoneDriver(base.BaseTestCase):
     def test_init_firewall_with_none_driver(self):
         set_enable_security_groups(False)
-        agent = sg_rpc.SecurityGroupAgentRpcMixin()
-        agent.plugin_rpc = mock.Mock()
-        agent.context = None
-        agent.init_firewall()
+        agent = sg_rpc.SecurityGroupAgentRpc(
+                context=None, plugin_rpc=mock.Mock(), root_helper=None)
         self.assertEqual(agent.firewall.__class__.__name__,
                          'NoopFirewallDriver')
 
@@ -1125,12 +1122,10 @@ class BaseSecurityGroupAgentRpcTestCase(base.BaseTestCase):
     def setUp(self, defer_refresh_firewall=False):
         super(BaseSecurityGroupAgentRpcTestCase, self).setUp()
         set_firewall_driver(FIREWALL_NOOP_DRIVER)
-        self.agent = sg_rpc.SecurityGroupAgentRpcMixin()
-        self.agent.context = None
+        self.agent = sg_rpc.SecurityGroupAgentRpc(
+                context=None, plugin_rpc=mock.Mock(), root_helper='sudo',
+                defer_refresh_firewall=defer_refresh_firewall)
         mock.patch('neutron.agent.linux.iptables_manager').start()
-        self.agent.root_helper = 'sudo'
-        self.agent.plugin_rpc = mock.Mock()
-        self.agent.init_firewall(defer_refresh_firewall=defer_refresh_firewall)
         self.default_firewall = self.agent.firewall
         self.firewall = mock.Mock()
         firewall_object = firewall_base.FirewallDriver()
@@ -1152,7 +1147,7 @@ class SecurityGroupAgentRpcTestCase(BaseSecurityGroupAgentRpcTestCase):
             defer_refresh_firewall)
         rpc = self.agent.plugin_rpc
         rpc.security_group_info_for_devices.side_effect = (
-                messaging.UnsupportedVersion('1.2'))
+                oslo_messaging.UnsupportedVersion('1.2'))
         rpc.security_group_rules_for_devices.return_value = (
             self.firewall.ports)
 
@@ -1604,14 +1599,9 @@ class SecurityGroupAgentRpcWithDeferredRefreshTestCase(
         self.assertFalse(self.agent.prepare_devices_filter.called)
 
 
-class FakeSGRpcApi(agent_rpc.PluginApi,
-                   sg_rpc.SecurityGroupServerRpcApiMixin):
-    pass
-
-
 class SecurityGroupServerRpcApiTestCase(base.BaseTestCase):
     def test_security_group_rules_for_devices(self):
-        rpcapi = FakeSGRpcApi('fake_topic')
+        rpcapi = sg_rpc.SecurityGroupServerRpcApi('fake_topic')
 
         with contextlib.nested(
             mock.patch.object(rpcapi.client, 'call'),
@@ -1631,7 +1621,7 @@ class SecurityGroupServerRpcApiTestCase(base.BaseTestCase):
 class FakeSGNotifierAPI(sg_rpc.SecurityGroupAgentRpcApiMixin):
     def __init__(self):
         self.topic = 'fake'
-        target = messaging.Target(topic=self.topic, version='1.0')
+        target = oslo_messaging.Target(topic=self.topic, version='1.0')
         self.client = n_rpc.get_client(target)
 
 
@@ -2515,27 +2505,20 @@ class TestSecurityGroupAgentWithIptables(base.BaseTestCase):
         super(TestSecurityGroupAgentWithIptables, self).setUp()
         config.register_root_helper(cfg.CONF)
         config.register_iptables_opts(cfg.CONF)
-        cfg.CONF.set_override(
-            'lock_path',
-            '$state_path/lock')
         set_firewall_driver(self.FIREWALL_DRIVER)
         cfg.CONF.set_override('enable_ipset', False, group='SECURITYGROUP')
         cfg.CONF.set_override('comment_iptables_rules', False, group='AGENT')
 
-        self.agent = sg_rpc.SecurityGroupAgentRpcMixin()
-        self.agent.context = None
-
-        self.root_helper = 'sudo'
-        self.agent.root_helper = 'sudo'
         self.rpc = mock.Mock()
-        self.agent.plugin_rpc = self.rpc
+        self.agent = sg_rpc.SecurityGroupAgentRpc(
+                context=None, plugin_rpc=self.rpc, root_helper='sudo',
+                defer_refresh_firewall=defer_refresh_firewall)
+        self.root_helper = 'sudo'
 
         if test_rpc_v1_1:
             self.rpc.security_group_info_for_devices.side_effect = (
-                messaging.UnsupportedVersion('1.2'))
+                oslo_messaging.UnsupportedVersion('1.2'))
 
-        self.agent.init_firewall(
-            defer_refresh_firewall=defer_refresh_firewall)
         self.iptables = self.agent.firewall.iptables
         # TODO(jlibosva) Get rid of mocking iptables execute and mock out
         # firewall instead

@@ -17,7 +17,7 @@
 import contextlib
 
 import mock
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.agent.linux import ip_lib
 from neutron.plugins.ibm.agent import sdnve_neutron_agent
@@ -104,7 +104,7 @@ class TestSdnveNeutronAgent(base.BaseTestCase):
 
     def test_get_info(self):
         with mock.patch.object(self.agent.int_br,
-                               'run_vsctl') as run_vsctl_func:
+                               'set_controller') as set_controller_func:
             kwargs = {}
             self.agent.info_update('dummy', **kwargs)
-        self.assertFalse(run_vsctl_func.called)
+        self.assertFalse(set_controller_func.called)

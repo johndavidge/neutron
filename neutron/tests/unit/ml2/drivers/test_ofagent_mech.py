@@ -13,7 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.common import constants
 from neutron.extensions import portbindings
@@ -38,13 +38,17 @@ class OfagentMechanismBaseTestCase(base.AgentMechanismBaseTestCase):
                    'tunnel_types': BAD_TUNNEL_TYPES}
 
     AGENTS = [{'alive': True,
-               'configurations': GOOD_CONFIGS}]
+               'configurations': GOOD_CONFIGS,
+               'host': 'host'}]
     AGENTS_DEAD = [{'alive': False,
-                    'configurations': GOOD_CONFIGS}]
+                    'configurations': GOOD_CONFIGS,
+                    'host': 'dead_host'}]
     AGENTS_BAD = [{'alive': False,
-                   'configurations': GOOD_CONFIGS},
+                   'configurations': GOOD_CONFIGS,
+                   'host': 'bad_host_1'},
                   {'alive': True,
-                   'configurations': BAD_CONFIGS}]
+                   'configurations': BAD_CONFIGS,
+                   'host': 'bad_host_2'}]
 
     def setUp(self):
         super(OfagentMechanismBaseTestCase, self).setUp()

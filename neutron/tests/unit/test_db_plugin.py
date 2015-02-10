@@ -18,8 +18,8 @@ import copy
 import itertools
 
 import mock
-from oslo.config import cfg
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_utils import importutils
 from testtools import matchers
 import webob.exc
 
@@ -43,6 +43,9 @@ from neutron.tests.unit import testlib_api
 from neutron.tests.unit import testlib_plugin
 
 DB_PLUGIN_KLASS = 'neutron.db.db_base_plugin_v2.NeutronDbPluginV2'
+
+DEVICE_OWNER_COMPUTE = 'compute:None'
+DEVICE_OWNER_NOT_COMPUTE = constants.DEVICE_OWNER_DHCP
 
 
 def optional_ctx(obj, fallback):
@@ -118,6 +121,11 @@ class NeutronDbPluginV2TestCase(testlib_api.WebTestCase,
         # Set the defualt status
         self.net_create_status = 'ACTIVE'
         self.port_create_status = 'ACTIVE'
+
+        self.dhcp_periodic_p = mock.patch(
+            'neutron.db.agentschedulers_db.DhcpAgentSchedulerDbMixin.'
+            'start_periodic_dhcp_agent_status_check')
+        self.patched_dhcp_periodic = self.dhcp_periodic_p.start()
 
         def _is_native_bulk_supported():
             plugin_obj = manager.NeutronManager.get_plugin()
@@ -1095,6 +1103,94 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
             self.assertEqual(res['port']['admin_state_up'],
                              data['port']['admin_state_up'])
 
+    def update_port_mac(self, port, updated_fixed_ips=None):
+        orig_mac = port['mac_address']
+        mac = orig_mac.split(':')
+        mac[5] = '01' if mac[5] != '01' else '00'
+        new_mac = ':'.join(mac)
+        data = {'port': {'mac_address': new_mac}}
+        if updated_fixed_ips:
+            data['port']['fixed_ips'] = updated_fixed_ips
+        req = self.new_update_request('ports', data, port['id'])
+        return req.get_response(self.api), new_mac
+
+    def _check_v6_auto_address_address(self, port, subnet):
+        if ipv6_utils.is_auto_address_subnet(subnet['subnet']):
+            port_mac = port['port']['mac_address']
+            subnet_cidr = subnet['subnet']['cidr']
+            eui_addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(subnet_cidr,
+                                                             port_mac))
+            self.assertEqual(port['port']['fixed_ips'][0]['ip_address'],
+                             eui_addr)
+
+    def check_update_port_mac(
+            self, expected_status=webob.exc.HTTPOk.code,
+            expected_error='StateInvalid', subnet=None,
+            device_owner=DEVICE_OWNER_COMPUTE, updated_fixed_ips=None,
+            host_arg={}, arg_list=[]):
+        with self.port(device_owner=device_owner, subnet=subnet,
+                       arg_list=arg_list, **host_arg) as port:
+            self.assertIn('mac_address', port['port'])
+            res, new_mac = self.update_port_mac(
+                port['port'], updated_fixed_ips=updated_fixed_ips)
+            self.assertEqual(expected_status, res.status_int)
+            if expected_status == webob.exc.HTTPOk.code:
+                result = self.deserialize(self.fmt, res)
+                self.assertIn('port', result)
+                self.assertEqual(new_mac, result['port']['mac_address'])
+                if subnet and subnet['subnet']['ip_version'] == 6:
+                    self._check_v6_auto_address_address(port, subnet)
+            else:
+                error = self.deserialize(self.fmt, res)
+                self.assertEqual(expected_error,
+                                 error['NeutronError']['type'])
+
+    def test_update_port_mac(self):
+        self.check_update_port_mac()
+        # sub-classes for plugins/drivers that support mac address update
+        # override this method
+
+    def test_update_port_mac_ip(self):
+        with self.subnet() as subnet:
+            updated_fixed_ips = [{'subnet_id': subnet['subnet']['id'],
+                              'ip_address': '10.0.0.3'}]
+            self.check_update_port_mac(subnet=subnet,
+                                       updated_fixed_ips=updated_fixed_ips)
+
+    def test_update_port_mac_v6_slaac(self):
+        with self.subnet(gateway_ip='fe80::1',
+                         cidr='2607:f0d0:1002:51::/64',
+                         ip_version=6,
+                         ipv6_address_mode=constants.IPV6_SLAAC) as subnet:
+            self.assertTrue(
+                ipv6_utils.is_auto_address_subnet(subnet['subnet']))
+            self.check_update_port_mac(subnet=subnet)
+
+    def test_update_port_mac_bad_owner(self):
+        self.check_update_port_mac(
+            device_owner=DEVICE_OWNER_NOT_COMPUTE,
+            expected_status=webob.exc.HTTPConflict.code,
+            expected_error='UnsupportedPortDeviceOwner')
+
+    def check_update_port_mac_used(self, expected_error='MacAddressInUse'):
+        with self.subnet() as subnet:
+            with self.port(subnet=subnet) as port:
+                with self.port(subnet=subnet) as port2:
+                    self.assertIn('mac_address', port['port'])
+                    new_mac = port2['port']['mac_address']
+                    data = {'port': {'mac_address': new_mac}}
+                    req = self.new_update_request('ports', data,
+                                                  port['port']['id'])
+                    res = req.get_response(self.api)
+                    self.assertEqual(webob.exc.HTTPConflict.code,
+                                     res.status_int)
+                    error = self.deserialize(self.fmt, res)
+                    self.assertEqual(expected_error,
+                                     error['NeutronError']['type'])
+
+    def test_update_port_mac_used(self):
+        self.check_update_port_mac_used()
+
     def test_update_port_not_admin(self):
         res = self._create_network(self.fmt, 'net1', True,
                                    tenant_id='not_admin',
@@ -1202,10 +1298,10 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
                 res = self.deserialize(self.fmt, req.get_response(self.api))
                 ips = res['port']['fixed_ips']
                 self.assertEqual(len(ips), 2)
-                self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
-                self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
-                self.assertEqual(ips[1]['ip_address'], '10.0.0.10')
-                self.assertEqual(ips[1]['subnet_id'], subnet['subnet']['id'])
+                self.assertIn({'ip_address': '10.0.0.2',
+                               'subnet_id': subnet['subnet']['id']}, ips)
+                self.assertIn({'ip_address': '10.0.0.10',
+                               'subnet_id': subnet['subnet']['id']}, ips)
 
     def test_update_port_update_ips(self):
         """Update IP and associate new IP on port.
@@ -1245,10 +1341,10 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
                                  data['port']['admin_state_up'])
                 ips = res['port']['fixed_ips']
                 self.assertEqual(len(ips), 2)
-                self.assertEqual(ips[0]['ip_address'], '10.0.0.3')
-                self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
-                self.assertEqual(ips[1]['ip_address'], '10.0.0.4')
-                self.assertEqual(ips[1]['subnet_id'], subnet['subnet']['id'])
+                self.assertIn({'ip_address': '10.0.0.3',
+                           'subnet_id': subnet['subnet']['id']}, ips)
+                self.assertIn({'ip_address': '10.0.0.4',
+                           'subnet_id': subnet['subnet']['id']}, ips)
 
     def test_update_port_invalid_fixed_ip_address_v6_slaac(self):
         with self.subnet(
@@ -1311,20 +1407,22 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
 
     def test_mac_exhaustion(self):
         # rather than actually consuming all MAC (would take a LONG time)
-        # we just raise the exception that would result.
-        @staticmethod
-        def fake_gen_mac(context, net_id):
-            raise n_exc.MacAddressGenerationFailure(net_id=net_id)
+        # we try to allocate an already allocated mac address
+        cfg.CONF.set_override('mac_generation_retries', 3)
 
-        with mock.patch.object(neutron.db.db_base_plugin_v2.NeutronDbPluginV2,
-                               '_generate_mac', new=fake_gen_mac):
-            res = self._create_network(fmt=self.fmt, name='net1',
-                                       admin_state_up=True)
-            network = self.deserialize(self.fmt, res)
-            net_id = network['network']['id']
+        res = self._create_network(fmt=self.fmt, name='net1',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        net_id = network['network']['id']
+
+        error = n_exc.MacAddressInUse(net_id=net_id, mac='00:11:22:33:44:55')
+        with mock.patch.object(
+                neutron.db.db_base_plugin_v2.NeutronDbPluginV2,
+                '_create_port_with_mac', side_effect=error) as create_mock:
             res = self._create_port(self.fmt, net_id=net_id)
             self.assertEqual(res.status_int,
                              webob.exc.HTTPServiceUnavailable.code)
+            self.assertEqual(3, create_mock.call_count)
 
     def test_requested_duplicate_ip(self):
         with self.subnet() as subnet:
@@ -1408,19 +1506,19 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
                 port3 = self.deserialize(self.fmt, res)
                 ips = port3['port']['fixed_ips']
                 self.assertEqual(len(ips), 2)
-                self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
-                self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
-                self.assertEqual(ips[1]['ip_address'], '2607:f0d0:1002:51::2')
-                self.assertEqual(ips[1]['subnet_id'], subnet2['subnet']['id'])
+                self.assertIn({'ip_address': '10.0.0.2',
+                               'subnet_id': subnet['subnet']['id']}, ips)
+                self.assertIn({'ip_address': '2607:f0d0:1002:51::2',
+                               'subnet_id': subnet2['subnet']['id']}, ips)
                 res = self._create_port(self.fmt, net_id=net_id)
                 port4 = self.deserialize(self.fmt, res)
                 # Check that a v4 and a v6 address are allocated
                 ips = port4['port']['fixed_ips']
                 self.assertEqual(len(ips), 2)
-                self.assertEqual(ips[0]['ip_address'], '10.0.0.3')
-                self.assertEqual(ips[0]['subnet_id'], subnet['subnet']['id'])
-                self.assertEqual(ips[1]['ip_address'], '2607:f0d0:1002:51::3')
-                self.assertEqual(ips[1]['subnet_id'], subnet2['subnet']['id'])
+                self.assertIn({'ip_address': '10.0.0.3',
+                               'subnet_id': subnet['subnet']['id']}, ips)
+                self.assertIn({'ip_address': '2607:f0d0:1002:51::3',
+                               'subnet_id': subnet2['subnet']['id']}, ips)
                 self._delete('ports', port3['port']['id'])
                 self._delete('ports', port4['port']['id'])
 
@@ -1484,12 +1582,14 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
                 ) as port:
                     ips = port['port']['fixed_ips']
                     self.assertEqual(len(ips), 2)
-                    self.assertEqual(ips[0]['ip_address'], '10.0.0.2')
+                    self.assertIn({'ip_address': '10.0.0.2',
+                                   'subnet_id': subnet['subnet']['id']}, ips)
                     port_mac = port['port']['mac_address']
                     subnet_cidr = subnet2['subnet']['cidr']
                     eui_addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(
                             subnet_cidr, port_mac))
-                    self.assertEqual(ips[1]['ip_address'], eui_addr)
+                    self.assertIn({'ip_address': eui_addr,
+                                   'subnet_id': subnet2['subnet']['id']}, ips)
 
     def test_ip_allocation_for_ipv6_subnet_slaac_address_mode(self):
         res = self._create_network(fmt=self.fmt, name='net',
@@ -1508,6 +1608,34 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
         eui_addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(subnet_cidr,
                                                          port_mac))
         self.assertEqual(port['port']['fixed_ips'][0]['ip_address'], eui_addr)
+
+    def test_ip_allocation_for_ipv6_2_subnet_slaac_mode(self):
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        v6_subnet_1 = self._make_subnet(self.fmt, network,
+                                        gateway='2001:100::1',
+                                        cidr='2001:100::0/64',
+                                        ip_version=6,
+                                        ipv6_ra_mode=constants.IPV6_SLAAC)
+        v6_subnet_2 = self._make_subnet(self.fmt, network,
+                                        gateway='2001:200::1',
+                                        cidr='2001:200::0/64',
+                                        ip_version=6,
+                                        ipv6_ra_mode=constants.IPV6_SLAAC)
+        port = self._make_port(self.fmt, network['network']['id'])
+        self.assertEqual(len(port['port']['fixed_ips']), 2)
+        port_mac = port['port']['mac_address']
+        cidr_1 = v6_subnet_1['subnet']['cidr']
+        cidr_2 = v6_subnet_2['subnet']['cidr']
+        eui_addr_1 = str(ipv6_utils.get_ipv6_addr_by_EUI64(cidr_1,
+                                                           port_mac))
+        eui_addr_2 = str(ipv6_utils.get_ipv6_addr_by_EUI64(cidr_2,
+                                                           port_mac))
+        self.assertEqual(port['port']['fixed_ips'][0]['ip_address'],
+                         eui_addr_1)
+        self.assertEqual(port['port']['fixed_ips'][1]['ip_address'],
+                         eui_addr_2)
 
     def test_range_allocation(self):
         with self.subnet(gateway_ip='10.0.0.3',
@@ -4053,7 +4181,8 @@ class DbModelTestCase(base.BaseTestCase):
         exp_middle = "[object at %x]" % id(network)
         exp_end_with = (" {tenant_id=None, id=None, "
                         "name='net_net', status='OK', "
-                        "admin_state_up=True, shared=None}>")
+                        "admin_state_up=True, shared=None, "
+                        "mtu=None, vlan_transparent=None}>")
         final_exp = exp_start_with + exp_middle + exp_end_with
         self.assertEqual(actual_repr_output, final_exp)
 
@@ -4168,6 +4297,48 @@ class TestNeutronDbPluginV2(base.BaseTestCase):
 
         self._validate_rebuild_availability_ranges(pools, allocations,
                                                    expected)
+
+    def _test__allocate_ips_for_port(self, subnets, port, expected):
+        plugin = db_base_plugin_v2.NeutronDbPluginV2()
+        with mock.patch.object(db_base_plugin_v2.NeutronDbPluginV2,
+                               'get_subnets') as get_subnets:
+            with mock.patch.object(db_base_plugin_v2.NeutronDbPluginV2,
+                                   '_check_unique_ip') as check_unique:
+                context = mock.Mock()
+                get_subnets.return_value = subnets
+                check_unique.return_value = True
+                actual = plugin._allocate_ips_for_port(context, port)
+                self.assertEqual(expected, actual)
+
+    def test__allocate_ips_for_port_2_slaac_subnets(self):
+        subnets = [
+            {
+                'cidr': u'2001:100::/64',
+                'enable_dhcp': True,
+                'gateway_ip': u'2001:100::1',
+                'id': u'd1a28edd-bd83-480a-bd40-93d036c89f13',
+                'ip_version': 6,
+                'ipv6_address_mode': None,
+                'ipv6_ra_mode': u'slaac'},
+            {
+                'cidr': u'2001:200::/64',
+                'enable_dhcp': True,
+                'gateway_ip': u'2001:200::1',
+                'id': u'dc813d3d-ed66-4184-8570-7325c8195e28',
+                'ip_version': 6,
+                'ipv6_address_mode': None,
+                'ipv6_ra_mode': u'slaac'}]
+        port = {'port': {
+            'network_id': 'fbb9b578-95eb-4b79-a116-78e5c4927176',
+            'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+            'mac_address': '12:34:56:78:44:ab'}}
+        expected = []
+        for subnet in subnets:
+            addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(
+                            subnet['cidr'], port['port']['mac_address']))
+            expected.append({'ip_address': addr, 'subnet_id': subnet['id']})
+
+        self._test__allocate_ips_for_port(subnets, port, expected)
 
 
 class NeutronDbPluginV2AsMixinTestCase(testlib_api.SqlTestCase):

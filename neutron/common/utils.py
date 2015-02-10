@@ -23,6 +23,7 @@ import functools
 import hashlib
 import logging as std_logging
 import multiprocessing
+import netaddr
 import os
 import random
 import signal
@@ -30,11 +31,11 @@ import socket
 import uuid
 
 from eventlet.green import subprocess
-from oslo.config import cfg
-from oslo.utils import excutils
+from oslo_concurrency import lockutils
+from oslo_config import cfg
+from oslo_utils import excutils
 
 from neutron.common import constants as q_const
-from neutron.openstack.common import lockutils
 from neutron.openstack.common import log as logging
 
 
@@ -369,3 +370,33 @@ def get_keystone_url(conf):
              'port': conf.auth_port})
     # NOTE(ihrachys): all existing consumers assume version 2.0
     return '%s/v2.0/' % auth_uri
+
+
+def ip_to_cidr(ip, prefix=None):
+    """Convert an ip with no prefix to cidr notation
+
+    :param ip: An ipv4 or ipv6 address.  Convertable to netaddr.IPNetwork.
+    :param prefix: Optional prefix.  If None, the default 32 will be used for
+        ipv4 and 128 for ipv6.
+    """
+    net = netaddr.IPNetwork(ip)
+    if prefix is not None:
+        # Can't pass ip and prefix separately.  Must concatenate strings.
+        net = netaddr.IPNetwork(str(net.ip) + '/' + str(prefix))
+    return str(net)
+
+
+def is_cidr_host(cidr):
+    """Determines if the cidr passed in represents a single host network
+
+    :param cidr: Either an ipv4 or ipv6 cidr.
+    :returns: True if the cidr is /32 for ipv4 or /128 for ipv6.
+    :raises ValueError: raises if cidr does not contain a '/'.  This disallows
+        plain IP addresses specifically to avoid ambiguity.
+    """
+    if '/' not in str(cidr):
+        raise ValueError("cidr doesn't contain a '/'")
+    net = netaddr.IPNetwork(cidr)
+    if net.version == 4:
+        return net.prefixlen == q_const.IPv4_BITS
+    return net.prefixlen == q_const.IPv6_BITS

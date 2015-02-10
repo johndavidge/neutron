@@ -15,7 +15,7 @@
 
 import collections
 import mock
-from oslo.utils import importutils
+from oslo_utils import importutils
 import testtools
 
 from neutron.common import constants as n_const
@@ -93,7 +93,7 @@ class FakePortContext(object):
         return self._network
 
     @property
-    def bound_segment(self):
+    def bottom_bound_segment(self):
         return self._segment
 
 
