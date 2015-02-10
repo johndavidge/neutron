@@ -292,6 +292,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
     def _destroy_router_namespace(self, ns):
         router_id = self.get_router_id(ns)
         ra.disable_ipv6_ra(router_id, ns, self.root_helper)
+        pd.disable_ipv6_pd(router_id, ns, self.root_helper)
         ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
