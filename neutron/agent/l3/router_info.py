@@ -35,6 +35,7 @@ class RouterInfo(object):
         self._snat_enabled = None
         self._snat_action = None
         self.internal_ports = []
+        self.pd_enabled_subnet = {}
         self.floating_ips = set()
         self.root_helper = root_helper
         # Invoke the setter for establishing initial SNAT action
