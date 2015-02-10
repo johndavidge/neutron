@@ -16,8 +16,8 @@
 import abc
 
 import netaddr
-from oslo.config import cfg
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_utils import importutils
 import six
 
 from neutron.agent.common import config
@@ -207,9 +207,9 @@ class OVSInterfaceDriver(LinuxInterfaceDriver):
 
     def _ovs_add_port(self, bridge, device_name, port_id, mac_address,
                       internal=True):
-        attrs = [('external-ids:iface-id', port_id),
-                 ('external-ids:iface-status', 'active'),
-                 ('external-ids:attached-mac', mac_address)]
+        attrs = [('external_ids', {'iface-id': port_id,
+                                   'iface-status': 'active',
+                                   'attached-mac': mac_address})]
         if internal:
             attrs.insert(0, ('type', 'internal'))
 

@@ -21,7 +21,14 @@
 #
 # find $path -type f  # path is the base dir you want to list files for
 
-set -ex
+set -e
+
+if [ $# -lt 2 ]; then
+  echo "Usage $0 <path to file containing list of files to export> <project name>"
+  exit 1
+fi
+
+set -x
 
 file_list_path="$1"
 project_name="$2"
@@ -97,6 +104,6 @@ port=29418
 project=stackforge/${project_name}.git
 EOF
 
-git add . && git commit -m "Generated new .gitreview file for ${project_name}."
+git add . && git commit -m "Generated new .gitreview file for ${project_name}"
 
 echo "Done."

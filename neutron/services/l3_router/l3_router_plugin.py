@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_utils import importutils
 
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.rpc.handlers import l3_rpc
@@ -54,7 +54,7 @@ class L3RouterPlugin(common_db_mixin.CommonDbMixin,
         self.setup_rpc()
         self.router_scheduler = importutils.import_object(
             cfg.CONF.router_scheduler_driver)
-        self.start_periodic_agent_status_check()
+        self.start_periodic_l3_agent_status_check()
         super(L3RouterPlugin, self).__init__()
 
     def setup_rpc(self):

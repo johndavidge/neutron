@@ -13,7 +13,7 @@
 #    under the License.
 
 import netaddr
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.agent.common import config
 from neutron.agent.linux import ip_lib
@@ -44,6 +44,11 @@ get_rand_name = sub_base.get_rand_name
 def get_rand_veth_name():
     return get_rand_name(max_length=n_const.DEVICE_NAME_MAX_LEN,
                          prefix=VETH_PREFIX)
+
+
+def get_rand_port_name():
+    return get_rand_name(prefix=PORT_PREFIX,
+                         max_length=n_const.DEVICE_NAME_MAX_LEN)
 
 
 class BaseLinuxTestCase(functional_base.BaseSudoTestCase):

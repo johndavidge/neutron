@@ -16,11 +16,13 @@
 
 import functools
 
-from oslo.config import cfg
-from oslo import messaging
-from oslo.utils import importutils
+from oslo_config import cfg
+import oslo_messaging
+from oslo_utils import importutils
 
 from neutron.agent import firewall
+from neutron.common import constants
+from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.i18n import _LI, _LW
 from neutron.openstack.common import log as logging
@@ -83,8 +85,21 @@ def disable_security_group_extension_by_config(aliases):
         _disable_extension('allowed-address-pairs', aliases)
 
 
-class SecurityGroupServerRpcApiMixin(object):
-    """A mix-in that enable SecurityGroup support in plugin rpc."""
+class SecurityGroupServerRpcApi(object):
+    """RPC client for security group methods in the plugin.
+
+    This class implements the client side of an rpc interface.  This interface
+    is used by agents to call security group related methods implemented on the
+    plugin side.  The other side of this interface can be found in
+    neutron.api.rpc.handlers.SecurityGroupServerRpcCallback.  For more
+    information about changing rpc interfaces, see
+    doc/source/devref/rpc_api.rst.
+    """
+    def __init__(self, topic):
+        target = oslo_messaging.Target(
+            topic=topic, version='1.0',
+            namespace=constants.RPC_NAMESPACE_SECGROUP)
+        self.client = n_rpc.get_client(target)
 
     def security_group_rules_for_devices(self, context, devices):
         LOG.debug("Get security group rules "
@@ -145,10 +160,15 @@ class SecurityGroupAgentRpcCallbackMixin(object):
         self.sg_agent.security_groups_provider_updated()
 
 
-class SecurityGroupAgentRpcMixin(object):
-    """A mix-in that enable SecurityGroup agent
-    support in agent implementations.
-    """
+class SecurityGroupAgentRpc(object):
+    """Enables SecurityGroup agent support in agent implementations."""
+
+    def __init__(self, context, plugin_rpc, root_helper,
+                 defer_refresh_firewall=False):
+        self.context = context
+        self.plugin_rpc = plugin_rpc
+        self.root_helper = root_helper
+        self.init_firewall(defer_refresh_firewall)
 
     def init_firewall(self, defer_refresh_firewall=False):
         firewall_driver = cfg.CONF.SECURITYGROUP.firewall_driver
@@ -180,7 +200,7 @@ class SecurityGroupAgentRpcMixin(object):
         try:
             self.plugin_rpc.security_group_info_for_devices(
                 self.context, devices=[])
-        except messaging.UnsupportedVersion:
+        except oslo_messaging.UnsupportedVersion:
             LOG.warning(_LW('security_group_info_for_devices rpc call not '
                             'supported by the server, falling back to old '
                             'security_group_rules_for_devices which scales '

@@ -18,8 +18,8 @@ import uuid
 
 import mock
 import netaddr
-from oslo.config import cfg
-from oslo.db import exception as db_exc
+from oslo_config import cfg
+from oslo_db import exception as db_exc
 from sqlalchemy import exc as sql_exc
 import webob.exc
 
@@ -345,7 +345,7 @@ class TestNetworksV2(test_plugin.TestNetworksV2, NsxPluginV2TestCase):
             nsxlib.switch, 'update_lswitch') as update_lswitch_mock:
             # don't worry about deleting this network, do not use
             # context manager
-            ctx = context.get_admin_context()
+            ctx = context.Context(user_id=None, tenant_id='gonzalo')
             plugin = manager.NeutronManager.get_plugin()
             net = plugin.create_network(
                 ctx, {'network': {'name': 'xxx',

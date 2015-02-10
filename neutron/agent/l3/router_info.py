@@ -12,15 +12,24 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from neutron.agent.l3 import dvr
-from neutron.agent.l3 import ha
+from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
+from neutron.common import utils as common_utils
+from neutron.openstack.common import log as logging
+
+LOG = logging.getLogger(__name__)
 
 
-class RouterInfo(dvr.RouterMixin, ha.RouterMixin):
+class RouterInfo(object):
 
-    def __init__(self, router_id, root_helper, router,
-                 use_ipv6=False, ns_name=None):
+    def __init__(self,
+                 router_id,
+                 router,
+                 root_helper,
+                 agent_conf,
+                 interface_driver,
+                 use_ipv6=False,
+                 ns_name=None):
         self.router_id = router_id
         self.ex_gw_port = None
         self._snat_enabled = None
@@ -37,8 +46,8 @@ class RouterInfo(dvr.RouterMixin, ha.RouterMixin):
             use_ipv6=use_ipv6,
             namespace=self.ns_name)
         self.routes = []
-
-        super(RouterInfo, self).__init__()
+        self.agent_conf = agent_conf
+        self.driver = interface_driver
 
     @property
     def router(self):
@@ -59,9 +68,40 @@ class RouterInfo(dvr.RouterMixin, ha.RouterMixin):
             # Gateway port was removed, remove rules
             self._snat_action = 'remove_rules'
 
+    @property
+    def is_ha(self):
+        # TODO(Carl) Refactoring should render this obsolete.  Remove it.
+        return False
+
     def perform_snat_action(self, snat_callback, *args):
         # Process SNAT rules for attached subnets
         if self._snat_action:
             snat_callback(self, self._router.get('gw_port'),
                           *args, action=self._snat_action)
         self._snat_action = None
+
+    def _update_routing_table(self, operation, route):
+        cmd = ['ip', 'route', operation, 'to', route['destination'],
+               'via', route['nexthop']]
+        ip_wrapper = ip_lib.IPWrapper(self.root_helper,
+                                      namespace=self.ns_name)
+        ip_wrapper.netns.execute(cmd, check_exit_code=False)
+
+    def routes_updated(self):
+        new_routes = self.router['routes']
+
+        old_routes = self.routes
+        adds, removes = common_utils.diff_list_of_dict(old_routes,
+                                                       new_routes)
+        for route in adds:
+            LOG.debug("Added route entry is '%s'", route)
+            # remove replaced route from deleted route
+            for del_route in removes:
+                if route['destination'] == del_route['destination']:
+                    removes.remove(del_route)
+            #replace success even if there is no existing route
+            self._update_routing_table('replace', route)
+        for route in removes:
+            LOG.debug("Removed route entry is '%s'", route)
+            self._update_routing_table('delete', route)
+        self.routes = new_routes

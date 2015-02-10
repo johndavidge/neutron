@@ -20,15 +20,12 @@ from neutron import context
 from neutron.tests.unit.ml2 import test_ml2_plugin as test_plugin
 
 
-ODL_NETWORKS = 'networks'
-ODL_SUBNETS = 'subnets'
-ODL_PORTS = 'ports'
-
-
 with mock.patch.dict(sys.modules,
                      {'networking_odl': mock.Mock(),
+                      'networking_odl.common': mock.Mock(),
                       'networking_odl.ml2': mock.Mock()}):
-    from neutron.plugins.ml2.drivers import mechanism_odl
+    from networking_odl.common import constants as const
+    from neutron.plugins.ml2.drivers.opendaylight import driver
 
 
 class TestODLShim(test_plugin.Ml2PluginV2TestCase):
@@ -37,59 +34,59 @@ class TestODLShim(test_plugin.Ml2PluginV2TestCase):
         super(TestODLShim, self).setUp()
         self.context = context.get_admin_context()
         self.plugin = mock.Mock()
-        self.driver = mechanism_odl.OpenDaylightMechanismDriver()
+        self.driver = driver.OpenDaylightMechanismDriver()
         self.driver.odl_drv = mock.Mock()
 
     def test_create_network_postcommit(self):
         self.driver.create_network_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('create',
-                                                           ODL_NETWORKS,
+                                                           const.ODL_NETWORKS,
                                                            self.context)
 
     def test_update_network_postcommit(self):
         self.driver.update_network_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('update',
-                                                           ODL_NETWORKS,
+                                                           const.ODL_NETWORKS,
                                                            self.context)
 
     def test_delete_network_postcommit(self):
         self.driver.delete_network_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('delete',
-                                                           ODL_NETWORKS,
+                                                           const.ODL_NETWORKS,
                                                            self.context)
 
     def test_create_subnet_postcommit(self):
         self.driver.create_subnet_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('create',
-                                                           ODL_SUBNETS,
+                                                           const.ODL_SUBNETS,
                                                            self.context)
 
     def test_update_subnet_postcommit(self):
         self.driver.update_subnet_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('update',
-                                                           ODL_SUBNETS,
+                                                           const.ODL_SUBNETS,
                                                            self.context)
 
     def test_delete_subnet_postcommit(self):
         self.driver.delete_subnet_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('delete',
-                                                           ODL_SUBNETS,
+                                                           const.ODL_SUBNETS,
                                                            self.context)
 
     def test_create_port_postcommit(self):
         self.driver.create_port_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('create',
-                                                           ODL_PORTS,
+                                                           const.ODL_PORTS,
                                                            self.context)
 
     def test_update_port_postcommit(self):
         self.driver.update_port_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('update',
-                                                           ODL_PORTS,
+                                                           const.ODL_PORTS,
                                                            self.context)
 
     def test_delete_port_postcommit(self):
         self.driver.delete_port_postcommit(self.context)
         self.driver.odl_drv.synchronize.assert_called_with('delete',
-                                                           ODL_PORTS,
+                                                           const.ODL_PORTS,
                                                            self.context)

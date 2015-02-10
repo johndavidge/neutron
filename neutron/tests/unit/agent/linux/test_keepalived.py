@@ -187,6 +187,12 @@ vrrp_instance VR_2 {
         config.reset()
         self.assertEqual('', config.get_config_str())
 
+    def test_get_existing_vip_ip_addresses_returns_list(self):
+        config = self._get_config()
+        instance = config.get_instance(1)
+        current_vips = sorted(instance.get_existing_vip_ip_addresses('eth2'))
+        self.assertEqual(['192.168.2.0/24', '192.168.3.0/24'], current_vips)
+
 
 class KeepalivedStateExceptionTestCase(base.BaseTestCase):
     def test_state_exception(self):
@@ -292,6 +298,15 @@ vrrp_instance VR_2 {
         instance = keepalived.KeepalivedInstance(
             'MASTER', 'eth0', 1, '169.254.192.0/18')
         self.assertEqual(expected, '\n'.join(instance.build_config()))
+
+
+class KeepalivedVipAddressTestCase(base.BaseTestCase):
+    def test_vip_with_scope(self):
+        vip = keepalived.KeepalivedVipAddress('fe80::3e97:eff:fe26:3bfa/64',
+                                              'eth1',
+                                              'link')
+        self.assertEqual('fe80::3e97:eff:fe26:3bfa/64 dev eth1 scope link',
+                         vip.build_config())
 
 
 class KeepalivedVirtualRouteTestCase(base.BaseTestCase):

@@ -19,11 +19,10 @@ import contextlib
 import StringIO
 import urllib2
 
-import fixtures
 import mock
-from oslo.config import cfg
-from oslo.serialization import jsonutils
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_serialization import jsonutils
+from oslo_utils import importutils
 import six
 import six.moves.urllib.request as urlrequest
 
@@ -44,10 +43,9 @@ class PolicyFileTestCase(base.BaseTestCase):
         self.addCleanup(policy.reset)
         self.context = context.Context('fake', 'fake', is_admin=False)
         self.target = {'tenant_id': 'fake'}
-        self.tempdir = self.useFixture(fixtures.TempDir())
 
     def test_modified_policy_reloads(self):
-        tmpfilename = self.tempdir.join('policy')
+        tmpfilename = self.get_temp_file_path('policy')
         action = "example:test"
         with open(tmpfilename, "w") as policyfile:
             policyfile.write("""{"example:test": ""}""")
@@ -167,8 +165,7 @@ class DefaultPolicyTestCase(base.BaseTestCase):
 
     def setUp(self):
         super(DefaultPolicyTestCase, self).setUp()
-        self.tempdir = self.useFixture(fixtures.TempDir())
-        tmpfilename = self.tempdir.join('policy.json')
+        tmpfilename = self.get_temp_file_path('policy.json')
         self.rules = {
             "default": '',
             "example:exist": '!',

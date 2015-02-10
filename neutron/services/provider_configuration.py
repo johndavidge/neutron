@@ -13,10 +13,11 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
+from oslo_config import cfg
 import stevedore
 
 from neutron.common import exceptions as n_exc
+from neutron.common import repos
 from neutron.i18n import _LW
 from neutron.openstack.common import log as logging
 from neutron.plugins.common import constants
@@ -69,7 +70,19 @@ def parse_service_provider_opt():
             raise n_exc.Invalid(
                 _("Provider name is limited by 255 characters: %s") % name)
 
-    svc_providers_opt = cfg.CONF.service_providers.service_provider
+    # Main neutron config file
+    try:
+        svc_providers_opt = cfg.CONF.service_providers.service_provider
+    except cfg.NoSuchOptError:
+        svc_providers_opt = []
+
+    # Add in entries from the *aas conf files
+    neutron_mods = repos.NeutronModules()
+    for x in neutron_mods.installed_list():
+        svc_providers_opt += neutron_mods.service_providers(x)
+
+    LOG.debug("Service providers = %s", svc_providers_opt)
+
     res = []
     for prov_def in svc_providers_opt:
         split = prov_def.split(':')

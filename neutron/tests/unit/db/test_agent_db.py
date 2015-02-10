@@ -16,8 +16,8 @@
 import datetime
 import mock
 
-from oslo.db import exception as exc
-from oslo.utils import timeutils
+from oslo_db import exception as exc
+from oslo_utils import timeutils
 import testscenarios
 
 from neutron.common import constants
@@ -133,7 +133,7 @@ class TestAgentsDbMixin(TestAgentsDbBase):
         #                   attempt on fail
         with mock.patch('sqlalchemy.orm.Session.add') as add_mock:
             add_mock.side_effect = [
-                exc.DBDuplicateEntry(columns=['agent_type', 'host']),
+                exc.DBDuplicateEntry(),
                 None
             ]
 

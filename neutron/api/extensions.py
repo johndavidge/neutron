@@ -15,17 +15,19 @@
 #    under the License.
 
 import abc
+import collections
 import imp
 import itertools
 import os
 
-from oslo.config import cfg
+from oslo_config import cfg
 import routes
 import six
 import webob.dec
 import webob.exc
 
 from neutron.common import exceptions
+from neutron.common import repos
 import neutron.extensions
 from neutron.i18n import _LE, _LI, _LW
 from neutron import manager
@@ -518,6 +520,7 @@ class ExtensionManager(object):
         See tests/unit/extensions/foxinsocks.py for an example extension
         implementation.
         """
+
         for path in self.path.split(':'):
             if os.path.exists(path):
                 self._load_all_extensions_from_path(path)
@@ -661,11 +664,32 @@ class ResourceExtension(object):
 # Returns the extension paths from a config entry and the __path__
 # of neutron.extensions
 def get_extensions_path():
-    paths = ':'.join(neutron.extensions.__path__)
-    if cfg.CONF.api_extensions_path:
-        paths = ':'.join([cfg.CONF.api_extensions_path, paths])
+    paths = neutron.extensions.__path__
 
-    return paths
+    neutron_mods = repos.NeutronModules()
+    for x in neutron_mods.installed_list():
+        try:
+            paths += neutron_mods.module(x).extensions.__path__
+        except AttributeError:
+            # Occurs normally if module has no extensions sub-module
+            pass
+
+    if cfg.CONF.api_extensions_path:
+        paths.append(cfg.CONF.api_extensions_path)
+
+    # If the path has dups in it, from discovery + conf file, the duplicate
+    # import of the same module and super() do not play nicely, so weed
+    # out the duplicates, preserving search order.
+
+    z = collections.OrderedDict()
+    for x in paths:
+        z[x] = 1
+    paths = z.keys()
+
+    LOG.debug("get_extension_paths = %s", paths)
+
+    path = ':'.join(paths)
+    return path
 
 
 def append_api_extensions_path(paths):

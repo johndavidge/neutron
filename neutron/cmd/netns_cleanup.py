@@ -18,13 +18,14 @@ import re
 import eventlet
 eventlet.monkey_patch()
 
-from oslo.config import cfg
-from oslo.utils import importutils
+from oslo_config import cfg
+from oslo_utils import importutils
 
 from neutron.agent.common import config as agent_config
-from neutron.agent import dhcp_agent
+from neutron.agent.dhcp import config as dhcp_config
 from neutron.agent.l3 import agent as l3_agent
 from neutron.agent.linux import dhcp
+from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ovs_lib
@@ -65,10 +66,18 @@ def setup_conf():
     agent_config.register_interface_driver_opts_helper(conf)
     agent_config.register_use_namespaces_opts_helper(conf)
     agent_config.register_root_helper(conf)
-    conf.register_opts(dhcp.OPTS)
-    conf.register_opts(dhcp_agent.DhcpAgent.OPTS)
+    conf.register_opts(dhcp_config.DHCP_AGENT_OPTS)
+    conf.register_opts(dhcp_config.DHCP_OPTS)
+    conf.register_opts(dhcp_config.DNSMASQ_OPTS)
     conf.register_opts(interface.OPTS)
     return conf
+
+
+def _get_dhcp_process_monitor(config, root_helper):
+    return external_process.ProcessMonitor(
+        config=config,
+        root_helper=root_helper,
+        resource_type='dhcp')
 
 
 def kill_dhcp(conf, namespace):
@@ -79,6 +88,7 @@ def kill_dhcp(conf, namespace):
     dhcp_driver = importutils.import_object(
         conf.dhcp_driver,
         conf=conf,
+        process_monitor=_get_dhcp_process_monitor(conf, root_helper),
         network=dhcp.NetModel(conf.use_namespaces, {'id': network_id}),
         root_helper=root_helper,
         plugin=FakeDhcpPlugin())
@@ -109,7 +119,8 @@ def unplug_device(conf, device):
     except RuntimeError:
         root_helper = agent_config.get_root_helper(conf)
         # Maybe the device is OVS port, so try to delete
-        bridge_name = ovs_lib.get_bridge_for_iface(root_helper, device.name)
+        ovs = ovs_lib.BaseOVS(root_helper)
+        bridge_name = ovs.get_bridge_for_iface(device.name)
         if bridge_name:
             bridge = ovs_lib.OVSBridge(bridge_name, root_helper)
             bridge.delete_port(device.name)

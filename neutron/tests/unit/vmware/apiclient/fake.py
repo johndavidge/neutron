@@ -12,7 +12,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.serialization import jsonutils
+from oslo_serialization import jsonutils
 import six.moves.urllib.parse as urlparse
 
 from neutron.openstack.common import log as logging
@@ -34,7 +34,7 @@ def _validate_resource(body):
     _validate_name(body.get('display_name'))
 
 
-class FakeClient:
+class FakeClient(object):
 
     LSWITCH_RESOURCE = 'lswitch'
     LPORT_RESOURCE = 'lport'
@@ -412,7 +412,7 @@ class FakeClient:
             def _lrouter_match(res_uuid):
                 # verify that the router exist
                 if parent_uuid and parent_uuid not in self._fake_lrouter_dict:
-                    raise Exception(_("lrouter:%s not found") % parent_uuid)
+                    raise api_exc.ResourceNotFound()
                 if (not parent_uuid or
                     res_dict[res_uuid].get('lr_uuid') == parent_uuid):
                     return True

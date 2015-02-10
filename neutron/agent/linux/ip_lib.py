@@ -17,7 +17,7 @@ import eventlet
 import os
 
 import netaddr
-from oslo.config import cfg
+from oslo_config import cfg
 
 from neutron.agent.linux import utils
 from neutron.common import exceptions
@@ -206,14 +206,16 @@ class IPWrapper(SubProcessBase):
 
 
 class IpRule(IPWrapper):
-    def add_rule_from(self, ip, table, rule_pr):
-        args = ['add', 'from', ip, 'lookup', table, 'priority', rule_pr]
-        ip = self._as_root('', 'rule', tuple(args))
+    def add(self, ip, table, rule_pr):
+        ip_version = netaddr.IPNetwork(ip).version
+        args = ['add', 'from', ip, 'table', table, 'priority', rule_pr]
+        ip = self._as_root([ip_version], 'rule', tuple(args))
         return ip
 
-    def delete_rule_priority(self, rule_pr):
-        args = ['del', 'priority', rule_pr]
-        ip = self._as_root('', 'rule', tuple(args))
+    def delete(self, ip, table, rule_pr):
+        ip_version = netaddr.IPNetwork(ip).version
+        args = ['del', 'table', table, 'priority', rule_pr]
+        ip = self._as_root([ip_version], 'rule', tuple(args))
         return ip
 
 
@@ -595,6 +597,36 @@ def device_exists_with_ip_mac(device_name, ip_cidr, mac, namespace=None,
         return False
     else:
         return True
+
+
+def get_routing_table(root_helper=None, namespace=None):
+    """Return a list of dictionaries, each representing a route.
+
+    The dictionary format is: {'destination': cidr,
+                               'nexthop': ip,
+                               'device': device_name}
+    """
+
+    ip_wrapper = IPWrapper(root_helper, namespace=namespace)
+    table = ip_wrapper.netns.execute(['ip', 'route'], check_exit_code=True)
+
+    routes = []
+    # Example for route_lines:
+    # default via 192.168.3.120 dev wlp3s0  proto static  metric 1024
+    # 10.0.0.0/8 dev tun0  proto static  scope link  metric 1024
+    # The first column is the destination, followed by key/value pairs.
+    # The generator splits the routing table by newline, then strips and splits
+    # each individual line.
+    route_lines = (line.split() for line in table.split('\n') if line.strip())
+    for route in route_lines:
+        network = route[0]
+        # Create a dict of key/value pairs (For example - 'dev': 'tun0')
+        # excluding the first column.
+        data = dict(route[i:i + 2] for i in range(1, len(route), 2))
+        routes.append({'destination': network,
+                       'nexthop': data.get('via'),
+                       'device': data.get('dev')})
+    return routes
 
 
 def ensure_device_is_ready(device_name, root_helper=None, namespace=None):

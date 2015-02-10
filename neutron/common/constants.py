@@ -61,6 +61,8 @@ MINIMUM_AGENTS_FOR_HA = 2
 
 IPv4 = 'IPv4'
 IPv6 = 'IPv6'
+IPv4_BITS = 32
+IPv6_BITS = 128
 
 DHCP_RESPONSE_PORT = 68
 
@@ -151,3 +153,5 @@ DB_INTEGER_MAX_VALUE = 2 ** 31 - 1
 RPC_NAMESPACE_DHCP_PLUGIN = 'dhcp'
 # RPC interface for the metadata service to get info from the plugin side
 RPC_NAMESPACE_METADATA = 'metadata'
+# RPC interface for plugin to agent security group API
+RPC_NAMESPACE_SECGROUP = 'secgroup'

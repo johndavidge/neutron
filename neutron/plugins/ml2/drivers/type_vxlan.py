@@ -13,8 +13,8 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-from oslo.config import cfg
-from oslo.db import exception as db_exc
+from oslo_config import cfg
+from oslo_db import exception as db_exc
 from six import moves
 import sqlalchemy as sa
 from sqlalchemy import sql
@@ -53,7 +53,7 @@ class VxlanAllocation(model_base.BASEV2):
     vxlan_vni = sa.Column(sa.Integer, nullable=False, primary_key=True,
                           autoincrement=False)
     allocated = sa.Column(sa.Boolean, nullable=False, default=False,
-                          server_default=sql.false())
+                          server_default=sql.false(), index=True)
 
 
 class VxlanEndpoints(model_base.BASEV2):
@@ -63,6 +63,7 @@ class VxlanEndpoints(model_base.BASEV2):
     __table_args__ = (
         sa.UniqueConstraint('host',
                             name='unique_ml2_vxlan_endpoints0host'),
+        model_base.BASEV2.__table_args__
     )
     ip_address = sa.Column(sa.String(64), primary_key=True)
     udp_port = sa.Column(sa.Integer, nullable=False)
