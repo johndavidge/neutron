@@ -297,9 +297,13 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
     def _destroy_router_namespace(self, ns):
         router_id = self.get_router_id(ns)
+        ri = self.router_info[router_id]
         if router_id in self.router_info:
-            self.router_info[router_id].radvd.disable()
-        pd.disable_ipv6_pd(router_id, ns, self.root_helper)
+            ri.radvd.disable()
+        for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
+            if pdo['client_started']:
+                pd.disable_ipv6_pd(router_id, ns, subnet_id, self.root_helper)
+
         ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
@@ -1284,7 +1288,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     else:
                         self.pd_client_pending = True
                 if pdo['notify_neutron']:
-                   prefix_update[subnet_id] = pdo['prefix'] 
+                   prefix_update[subnet_id] = pdo['prefix']
                    pdo['notify_neutron'] = False
 
         if prefix_update:

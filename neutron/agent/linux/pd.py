@@ -93,7 +93,7 @@ def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     dibbler_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
     buf = six.StringIO()
     buf.write('%s' % CONFIG_TEMPLATE.render(
-                         enterprise_number=8888, 
+                         enterprise_number=8888,
                          va_id='0x%s' % _convert_subnet_id(subnet_id),
                          script_path='"%s/notify.sh"' % dcwa,
                          interface_name='"%s"' % ex_gw_ifname))
@@ -119,7 +119,7 @@ def _spawn_dibbler(router_id, subnet_id, lla,
                                    router_ns,
                                    'dibbler',
                                    pid_file=pid_file)
-    
+
     dibbler.enable(callback, True)
     LOG.debug("dibbler client enabled for router %s subnet %s",
               router_id, subnet_id)
@@ -127,7 +127,7 @@ def _spawn_dibbler(router_id, subnet_id, lla,
 
 def _is_dibbler_client_running(subnet_id):
     return utils.get_value_from_file(_get_pid_path(subnet_id))
-    
+
 
 def enable_ipv6_pd(router_id, router_ns, subnet_id,
                    root_helper, ex_gw_ifname, lla):
