@@ -15,11 +15,11 @@
 
 import eventlet
 import netaddr
-from oslo.config import cfg
-from oslo_messaging
-from oslo.utils import excutils
-from oslo.utils import importutils
-from oslo.utils import timeutils
+from oslo_config import cfg
+import oslo_messaging
+from oslo_utils import excutils
+from oslo_utils import importutils
+from oslo_utils import timeutils
 import signal
 
 from neutron.agent.common import config
@@ -491,6 +491,10 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                               internal_ports,
                               self.get_internal_device_name,
                               self.root_helper)
+
+        # Process PD
+        if pd_enabled:
+            self._process_pd(ri, update_ports, old_pd_enabled_subnet)
 
         # Process PD
         if pd_enabled:
