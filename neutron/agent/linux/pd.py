@@ -102,11 +102,13 @@ def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     return dcwa
 
 
-def _spawn_dibbler(router_id, subnet_id, dibbler_conf, router_ns, root_helper):
+def _spawn_dibbler(router_id, subnet_id, lla,
+                   dibbler_conf, router_ns, root_helper):
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
                        'start',
-                       '-W', '%s' % dibbler_conf]
+                       '-W', '%s' % dibbler_conf,
+                       '-A', '%s' % lla]
         return dibbler_cmd
 
     pid_file = _get_pid_path(subnet_id)
@@ -128,12 +130,12 @@ def _is_dibbler_client_running(subnet_id):
     
 
 def enable_ipv6_pd(router_id, router_ns, subnet_id,
-                   root_helper, ex_gw_ifname):
+                   root_helper, ex_gw_ifname, lla):
     LOG.debug("Enable IPv6 PD for router %s subnet %s", router_id, subnet_id)
     if not _is_dibbler_client_running(subnet_id):
         dibbler_conf = _generate_dibbler_conf(router_id,
                                               subnet_id, ex_gw_ifname)
-        _spawn_dibbler(router_id, subnet_id,
+        _spawn_dibbler(router_id, subnet_id, lla,
                        dibbler_conf, router_ns, root_helper)
 
 
