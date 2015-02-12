@@ -1279,7 +1279,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                         pdo['client_started'] = True
                     else:
                         self.pd_client_pending = True
-               if pdo['notify_neutron']:
+                if pdo['notify_neutron']:
                    prefix_update[subnet_id] = pdo['prefix'] 
                    pdo['notify_neutron'] = False
 
