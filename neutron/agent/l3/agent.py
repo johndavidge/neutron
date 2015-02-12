@@ -1305,8 +1305,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                         pdo['prefix'] = prefix
                         prefix_update[subnet_id] = prefix
         LOG.debug("Update server with prefixes: %s", prefix_update)
-        #if prefix_update:
-        #    self.plugin_rpc.send_prefix_update(self.context, prefix_update)
+        if prefix_update:
+            self.plugin_rpc.send_prefix_update(self.context, prefix_update)
 
     def _update_routing_table(self, ri, operation, route):
         cmd = ['ip', 'route', operation, 'to', route['destination'],
