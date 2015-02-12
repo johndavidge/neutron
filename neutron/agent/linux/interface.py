@@ -132,6 +132,29 @@ class LinuxInterfaceDriver(object):
         for route in existing_onlink_routes - new_onlink_routes:
             device.route.delete_onlink_route(route)
 
+    def add_v6addr(self, device_name, v6addr, namespace):
+        device = ip_lib.IPDevice(device_name,
+                                 self.root_helper,
+                                 namespace=namespace)
+        net = netaddr.IPNetwork(v6addr)
+        device.addr.add(6, str(net), str(net.broadcast))
+
+    def delete_lla(self, device_name, lla, namespace):
+        device = ip_lib.IPDevice(device_name,
+                                 self.root_helper,
+                                 namespace=namespace)
+        device.addr.delete(6, lla)
+        self.delete_conntrack_state(root_helper=self.root_helper,
+                                    namespace=namespace,
+                                    ip=lla)
+
+    def get_llas(self, device_name, namespace):
+        device = ip_lib.IPDevice(device_name,
+                                 self.root_helper,
+                                 namespace=namespace)
+
+        return device.addr.get_llas()
+
     def delete_conntrack_state(self, root_helper, namespace, ip):
         """Delete conntrack state associated with an IP address.
 
