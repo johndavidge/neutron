@@ -353,6 +353,16 @@ class IpAddrCommand(IpDeviceCommandBase):
     def flush(self):
         self._as_root('flush', self.name)
 
+    def get_llas(self):
+        retval = []
+        for line in self._run('show', self.name, 'scope', 'link',
+                              options=[6]).split('\n'):
+            line = line.strip()
+            if not line.startswith('inet6'):
+                continue
+            retval.append(line.split()[1:])
+        return retval
+
     def list(self, scope=None, to=None, filters=None):
         if filters is None:
             filters = []
