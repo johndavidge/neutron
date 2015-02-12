@@ -453,8 +453,10 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         new_ipv6_port = False
         old_ipv6_port = False
+        pd_enabled = False
         for p in new_ports:
             if p['subnet']['cidr'] == l3_constants.TEMP_PD_PREFIX:
+                pd_enabled = True
                 self._add_pd_enabled_subnet(ri, p['id'], p['subnet'])
             self._set_subnet_info(p)
             self.internal_network_added(ri, p)
@@ -466,7 +468,9 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         old_pd_enabled_subnet = []
         for p in old_ports:
-            old_pd_enabled_subnet.append(p['subnet']['id'])
+            if p['subnet']['cidr'] == l3_constants.TEMP_PD_PREFIX:
+                pd_enabled = True
+                old_pd_enabled_subnet.append(p['subnet']['id'])
             self.internal_network_removed(ri, p)
             ri.internal_ports.remove(p)
             if (not old_ipv6_port and
@@ -486,7 +490,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                               self.root_helper)
 
         # Process PD
-        self._process_pd(ri, update_ports, old_pd_enabled_subnet)
+        if pd_enabled:
+            self._process_pd(ri, update_ports, old_pd_enabled_subnet)
 
         existing_devices = self._get_existing_devices(ri)
         current_internal_devs = set([n for n in existing_devices
