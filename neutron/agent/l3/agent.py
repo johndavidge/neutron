@@ -124,7 +124,8 @@ class L3PluginApi(object):
     def send_prefix_update(self, context, prefix_update):
         """Send prefix update whenever prefixes get changed."""
         cctxt = self.client.prepare(version='1.3')
-        return cctxt.call(context, 'process_prefix_update')
+        return cctxt.call(context, 'process_prefix_update',
+                          subnets=prefix_update)
 
 
 class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
