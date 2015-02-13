@@ -488,18 +488,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         if new_ipv6_port or old_ipv6_port:
             ri.radvd.enable(internal_ports)
 
-        # Enable PD
-        if new_ipv6_port or old_ipv6_port:
-            pd.enable_ipv6_pd(ri.router_id,
-                              ri.ns_name,
-                              internal_ports,
-                              self.get_internal_device_name,
-                              self.root_helper)
-
-        # Process PD
-        if pd_enabled:
-            self._process_pd(ri, update_ports, old_pd_enabled_subnet)
-
         # Process PD
         if pd_enabled:
             self._process_pd(ri, update_ports, old_pd_enabled_subnet)
