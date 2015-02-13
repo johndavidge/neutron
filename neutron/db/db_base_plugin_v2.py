@@ -1199,10 +1199,14 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
         if s.get('cidr') is None:
             s['cidr'] = db_subnet.cidr
+        else:
+            net = netaddr.IPNetwork(subnet['subnet']['cidr'])
+            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
+            s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
 
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
-        if s.get('gateway_ip') is not None:
+        if s.get('gateway_ip') is not None and s.get('cidr') is None:
             allocation_pools = [{'start': p['first_ip'], 'end': p['last_ip']}
                                 for p in db_subnet.allocation_pools]
             self._validate_gw_out_of_pools(s["gateway_ip"], allocation_pools)
