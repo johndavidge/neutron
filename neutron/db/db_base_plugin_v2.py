@@ -1195,8 +1195,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         # value since _validate_subnet() expects subnet spec has 'ip_version'
         # and 'allocation_pools' fields.
         s['ip_version'] = db_subnet.ip_version
-        s['cidr'] = db_subnet.cidr
         s['id'] = db_subnet.id
+
+        if s.get('cidr') is None:
+            s['cidr'] = db_subnet.cidr
+
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
         if s.get('gateway_ip') is not None:
