@@ -29,7 +29,7 @@ def main():
     agent_pid = sys.argv[3]
     prefix = os.environ.get('PREFIX1')
 
-    if operation == "add" or operation == "update":
+    if operation == "BOUND" or operation == "REBIND":
         replace_file(prefix_fname, "%s/64" % prefix)
     elif operation == "delete":
         replace_file(prefix_fname, "::/64")

@@ -37,7 +37,7 @@ OPTS = [
 cfg.CONF.register_opts(OPTS)
 
 CONFIG_TEMPLATE = jinja2.Template("""
-# Config for dibbler-client.
+# Config for isc-dhcp-client.
 
 # Use enterprise number based duid
 duid-type duid-en {{ enterprise_number }} {{ va_id }}
@@ -61,10 +61,10 @@ iface {{ interface_name }} {
 # The first line must be #!/bin/bash
 SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
 
-neutron-pd-notify $1 {{ prefix_path }} {{ l3_agent_pid }}
+neutron-pd-notify $reason {{ prefix_path }} {{ l3_agent_pid }}
 """)
 
-def _get_dibbler_client_working_area(subnet_id):
+def _get_isc_dhcp_client_working_area(subnet_id):
     return "%s/%s" % (cfg.CONF.pd_confs, subnet_id)
 
 
@@ -73,15 +73,17 @@ def _convert_subnet_id(subnet_id):
 
 
 def _get_prefix_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
     return "%s/prefix" % dcwa
 
+
 def _get_pid_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
     return "%s/client.pid" % dcwa
 
-def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+
+def _generate_isc_dhcp_conf(router_id, subnet_id, ex_gw_ifname):
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
     script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
     buf = six.StringIO()
     buf.write('%s' % SCRIPT_TEMPLATE.render(
@@ -90,67 +92,78 @@ def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     utils.replace_file(script_path, buf.getvalue())
     os.chmod(script_path, 0o744)
 
-    dibbler_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
-    buf = six.StringIO()
-    buf.write('%s' % CONFIG_TEMPLATE.render(
-                         enterprise_number=8888,
-                         va_id='0x%s' % _convert_subnet_id(subnet_id),
-                         script_path='"%s/notify.sh"' % dcwa,
-                         interface_name='"%s"' % ex_gw_ifname))
+    #isc_dhcp_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
+    #buf = six.StringIO()
+    #buf.write('%s' % CONFIG_TEMPLATE.render(
+                         #enterprise_number=8888,
+                         #va_id='0x%s' % _convert_subnet_id(subnet_id),
+                         #script_path='"%s/notify.sh"' % dcwa,
+                         #interface_name='"%s"' % ex_gw_ifname))
 
-    utils.replace_file(dibbler_conf, buf.getvalue())
+    #utils.replace_file(isc_dhcp_conf, buf.getvalue())
     return dcwa
 
 
-def _spawn_dibbler(router_id, subnet_id, lla,
-                   dibbler_conf, router_ns, root_helper):
+def _spawn_isc_dhcp(router_id, subnet_id, lla,
+                    router_ns, root_helper, ex_gw_ifname):
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
+    script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
+    pid_file = _get_pid_path(subnet_id)
+    buf = six.StringIO()
+    buf.write('%s' % SCRIPT_TEMPLATE.render(
+                         prefix_path=_get_prefix_path(subnet_id),
+                         l3_agent_pid=os.getpid()))
+    utils.replace_file(script_path, buf.getvalue())
+    os.chmod(script_path, 0o744)
+
     def callback(pid_file):
-        dibbler_cmd = ['dibbler-client',
-                       'start',
-                       '-W', '%s' % dibbler_conf,
-                       '-A', '%s' % lla]
-        return dibbler_cmd
+        isc_dhcp_cmd = ['dhclient',
+                       '-P',
+                       '-pf', '%s' % pid_file,
+                       '-sf', '%s' % script_path,
+                       ex_gw_ifname]
+        return isc_dhcp_cmd
 
     pid_file = _get_pid_path(subnet_id)
-    dibbler = external_process.ProcessManager(
+    isc_dhcp = external_process.ProcessManager(
                                    cfg.CONF,
                                    subnet_id,
                                    root_helper,
                                    router_ns,
-                                   'dibbler',
+                                   'isc_dhcp',
                                    pid_file=pid_file)
 
-    dibbler.enable(callback, True)
-    LOG.debug("dibbler client enabled for router %s subnet %s",
+    isc_dhcp.enable(callback, True)
+    LOG.debug("isc_dhcp client enabled for router %s subnet %s",
               router_id, subnet_id)
 
 
-def _is_dibbler_client_running(subnet_id):
+def _is_isc_dhcp_client_running(subnet_id):
     return utils.get_value_from_file(_get_pid_path(subnet_id))
 
 
 def enable_ipv6_pd(router_id, router_ns, subnet_id,
                    root_helper, ex_gw_ifname, lla):
     LOG.debug("Enable IPv6 PD for router %s subnet %s", router_id, subnet_id)
-    if not _is_dibbler_client_running(subnet_id):
-        dibbler_conf = _generate_dibbler_conf(router_id,
-                                              subnet_id, ex_gw_ifname)
-        _spawn_dibbler(router_id, subnet_id, lla,
-                       dibbler_conf, router_ns, root_helper)
+    if not _is_isc_dhcp_client_running(subnet_id):
+        #isc_dhcp_conf = _generate_isc_dhcp_conf(router_id,
+                                              #subnet_id, ex_gw_ifname)
+        _spawn_isc_dhcp(router_id, subnet_id, lla,
+                        router_ns, root_helper, ex_gw_ifname)
 
 
 def disable_ipv6_pd(router_id, router_ns, subnet_id, root_helper):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
-    dibbler = external_process.ProcessManager(
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
+    isc_dhcp = external_process.ProcessManager(
                                    cfg.CONF,
                                    subnet_id,
                                    root_helper,
                                    router_ns,
-                                   'dibbler',
+                                   'isc_dhcp',
                                    pid_file=_get_pid_path(subnet_id))
-    dibbler.disable()
+    isc_dhcp.disable()
     shutil.rmtree(dcwa, ignore_errors=True)
-    LOG.debug("dibbler client disabled for router %s subnet %s",
+    LOG.debug("isc_dhcp client disabled for router %s subnet %s",
               router_id, subnet_id)
 
 
