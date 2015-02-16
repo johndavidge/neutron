@@ -61,7 +61,7 @@ iface {{ interface_name }} {
 # The first line must be #!/bin/bash
 SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
 
-neutron-pd-notify $reason {{ prefix_path }} {{ l3_agent_pid }}
+neutron-pd-notify $reason {{ prefix_path }} {{ l3_agent_pid }} $new_ip6_prefix
 """)
 
 def _get_isc_dhcp_client_working_area(subnet_id):
@@ -80,6 +80,11 @@ def _get_prefix_path(subnet_id):
 def _get_pid_path(subnet_id):
     dcwa = _get_isc_dhcp_client_working_area(subnet_id)
     return "%s/client.pid" % dcwa
+
+
+def _get_lease_path(subnet_id):
+    dcwa = _get_isc_dhcp_client_working_area(subnet_id)
+    return "%s/client.leases" % dcwa
 
 
 def _generate_isc_dhcp_conf(router_id, subnet_id, ex_gw_ifname):
@@ -109,6 +114,7 @@ def _spawn_isc_dhcp(router_id, subnet_id, lla,
     dcwa = _get_isc_dhcp_client_working_area(subnet_id)
     script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
     pid_file = _get_pid_path(subnet_id)
+    lease_file = _get_lease_path(subnet_id)
     buf = six.StringIO()
     buf.write('%s' % SCRIPT_TEMPLATE.render(
                          prefix_path=_get_prefix_path(subnet_id),
@@ -120,6 +126,7 @@ def _spawn_isc_dhcp(router_id, subnet_id, lla,
         isc_dhcp_cmd = ['dhclient',
                        '-P',
                        '-pf', '%s' % pid_file,
+                       '-lf', '%s' % lease_file,
                        '-sf', '%s' % script_path,
                        ex_gw_ifname]
         return isc_dhcp_cmd

@@ -1360,6 +1360,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     if prefix != pdo['prefix']:
                         pdo['prefix'] = prefix
                         pdo['notify_neutron'] = True
+        self.pd_client_pending = True
 
 
 class L3NATAgentWithStateReport(L3NATAgent):

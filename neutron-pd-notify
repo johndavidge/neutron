@@ -27,11 +27,15 @@ def main():
     operation = sys.argv[1]
     prefix_fname = sys.argv[2]
     agent_pid = sys.argv[3]
-    prefix = os.environ.get('PREFIX1')
+    try:
+        prefix = sys.argv[4]
+    except:
+        prefix = None
 
-    if operation == "BOUND" or operation == "REBIND":
+    if ((operation == "BOUND" or operation == "REBIND" or operation == "BOUND6"
+        or operation == "RENEW6" or operation == "REBIND6") and prefix is not None):
         replace_file(prefix_fname, "%s/64" % prefix)
-    elif operation == "delete":
+    else:
         replace_file(prefix_fname, "::/64")
     os.kill(int(agent_pid), signal.SIGHUP)
 
