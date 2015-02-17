@@ -24,12 +24,13 @@ def replace_file(file_name, data):
 
 
 def main():
-    operation = sys.argv[1]
-    prefix_fname = sys.argv[2]
-    agent_pid = sys.argv[3]
+    prefix_fname = sys.argv[1]
+    agent_pid = sys.argv[2]
     try:
+        operation = sys.argv[3]
         prefix = sys.argv[4]
     except:
+        operation = "NONE"
         prefix = None
 
     if ((operation == "BOUND" or operation == "REBIND" or operation == "BOUND6"
