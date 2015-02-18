@@ -127,7 +127,6 @@ class L3PluginApi(object):
         return cctxt.call(context, 'process_prefix_update',
                           subnets=prefix_update)
 
-
 class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                  ha.AgentMixin,
                  dvr.AgentMixin,
@@ -1360,6 +1359,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     if prefix != pdo['prefix']:
                         pdo['prefix'] = prefix
                         pdo['notify_neutron'] = True
+        self.pd_client_pending = True
 
 
 class L3NATAgentWithStateReport(L3NATAgent):

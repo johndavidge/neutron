@@ -1204,6 +1204,24 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
 
+        # Find router interface ports that have not yet been updated
+        # with an IP address by Prefix Delegation, and update them
+        ports = self.get_ports(context)
+        for port in ports:
+            if "router_interface" in port['device_owner']:
+                for ip in port['fixed_ips']:
+                    if (ip['ip_address'] == "::"
+                        and ip ['subnet_id'] == s['id']):
+                        new_port = {}
+                        new_port['port'] = port
+                        fixed_ips = []
+                        fixed_ip = {}
+                        fixed_ip['subnet_id'] = s['id']
+                        fixed_ip['ip_address'] = s['gateway_ip']
+                        fixed_ips.append(fixed_ip)
+                        new_port['port']['fixed_ips'] = fixed_ips 
+                        self.update_port(context, port['id'], new_port)
+
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
         if s.get('gateway_ip') is not None and s.get('cidr') is None:
