@@ -2050,3 +2050,28 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         agent.process_router_floating_ip_addresses.assert_called_with(
             mock.sentinel.ri,
             mock.sentinel.ex_gw_port)
+
+    def test_spawn_dibbler(self):
+        router = prepare_router_data()
+
+        conffile = '/etc/dibbler/client.conf'
+        pidfile = '/fake/dibbler.pid'
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+
+        # we don't want the whole process manager to be mocked to be
+        # able to catch execute() calls
+        self.external_process_p.stop()
+        self.ip_cls_p.stop()
+
+        get_pid_file_name = ('neutron.agent.linux.external_process.'
+                             'ProcessManager.get_pid_file_name')
+        with mock.patch('neutron.agent.linux.utils.execute') as execute:
+            with mock.patch(get_pid_file_name) as get_pid:
+                get_pid.return_value = pidfile
+                pd._spawn_dibbler(router['id'],
+                                  conffile,
+                                  agent.get_ns_name(router['id']),
+                                  self.conf.root_helper)
+            cmd = execute.call_args[0][0]
+
+        self.assertIn('dibbler', cmd)

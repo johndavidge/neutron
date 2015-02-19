@@ -136,6 +136,10 @@ IPV6_MODES = [DHCPV6_STATEFUL, DHCPV6_STATELESS, IPV6_SLAAC]
 
 IPV6_LLA_PREFIX = 'fe80::/64'
 
+# Special temporary prefix and address for IPv6 Prefix Delegation
+TEMP_PD_PREFIX = '::/64'
+TEMP_PD_ADDRESS = '::'
+
 # Linux interface max length
 DEVICE_NAME_MAX_LEN = 15
 

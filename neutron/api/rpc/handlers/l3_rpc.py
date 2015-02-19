@@ -216,3 +216,10 @@ class L3RpcCallback(object):
 
         return self.l3plugin.update_router_state(context, router_id, state,
                                                  host=host)
+
+    def process_prefix_update(self, context, **kwargs):
+        subnets = kwargs.get('subnets')
+
+        for (subnet_id, prefix) in subnets.iteritems():
+            return self.plugin.update_subnet(context, subnet_id,
+                                             {'subnet': {'cidr': prefix}})
