@@ -16,9 +16,6 @@
 
 import sys
 
-import eventlet
-eventlet.monkey_patch()
-
 from oslo_config import cfg
 
 from neutron.agent.common import config
@@ -34,7 +31,6 @@ def register_options():
     config.register_interface_driver_opts_helper(cfg.CONF)
     config.register_use_namespaces_opts_helper(cfg.CONF)
     config.register_agent_state_opts_helper(cfg.CONF)
-    config.register_root_helper(cfg.CONF)
     cfg.CONF.register_opts(dhcp_config.DHCP_AGENT_OPTS)
     cfg.CONF.register_opts(dhcp_config.DHCP_OPTS)
     cfg.CONF.register_opts(dhcp_config.DNSMASQ_OPTS)

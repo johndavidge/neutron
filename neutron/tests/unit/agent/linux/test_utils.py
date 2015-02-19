@@ -21,27 +21,15 @@ from neutron.tests import base
 _marker = object()
 
 
-class FakeCreateProcess(object):
-    class FakeStdin(object):
-        def close(self):
-            pass
-
-    def __init__(self, returncode):
-        self.returncode = returncode
-        self.stdin = self.FakeStdin()
-
-    def communicate(self, process_input=None):
-        return '', ''
-
-
 class AgentUtilsExecuteTest(base.BaseTestCase):
     def setUp(self):
         super(AgentUtilsExecuteTest, self).setUp()
         self.root_helper = "echo"
         self.test_file = self.get_temp_file_path('test_execute.tmp')
         open(self.test_file, 'w').close()
-        self.mock_popen_p = mock.patch("subprocess.Popen.communicate")
-        self.mock_popen = self.mock_popen_p.start()
+        self.process = mock.patch('eventlet.green.subprocess.Popen').start()
+        self.process.return_value.returncode = 0
+        self.mock_popen = self.process.return_value.communicate
 
     def test_without_helper(self):
         expected = "%s\n" % self.test_file
@@ -89,34 +77,33 @@ class AgentUtilsExecuteTest(base.BaseTestCase):
         self.assertEqual(result, expected)
 
     def test_return_code_log_error_raise_runtime(self):
-        with mock.patch.object(utils, 'create_process') as create_process:
-            create_process.return_value = FakeCreateProcess(1), 'ls'
-            with mock.patch.object(utils, 'LOG') as log:
-                self.assertRaises(RuntimeError, utils.execute,
-                                  ['ls'])
-                self.assertTrue(log.error.called)
+        self.mock_popen.return_value = ('', '')
+        self.process.return_value.returncode = 1
+        with mock.patch.object(utils, 'LOG') as log:
+            self.assertRaises(RuntimeError, utils.execute,
+                              ['ls'])
+            self.assertTrue(log.error.called)
 
     def test_return_code_log_error_no_raise_runtime(self):
-        with mock.patch.object(utils, 'create_process') as create_process:
-            create_process.return_value = FakeCreateProcess(1), 'ls'
-            with mock.patch.object(utils, 'LOG') as log:
-                utils.execute(['ls'], check_exit_code=False)
-                self.assertTrue(log.error.called)
+        self.mock_popen.return_value = ('', '')
+        self.process.return_value.returncode = 1
+        with mock.patch.object(utils, 'LOG') as log:
+            utils.execute(['ls'], check_exit_code=False)
+            self.assertTrue(log.error.called)
 
     def test_return_code_log_debug(self):
-        with mock.patch.object(utils, 'create_process') as create_process:
-            create_process.return_value = FakeCreateProcess(0), 'ls'
-            with mock.patch.object(utils, 'LOG') as log:
-                utils.execute(['ls'])
-                self.assertTrue(log.debug.called)
+        self.mock_popen.return_value = ('', '')
+        with mock.patch.object(utils, 'LOG') as log:
+            utils.execute(['ls'])
+            self.assertTrue(log.debug.called)
 
     def test_return_code_raise_runtime_do_not_log_fail_as_error(self):
-        with mock.patch.object(utils, 'create_process') as create_process:
-            create_process.return_value = FakeCreateProcess(1), 'ls'
-            with mock.patch.object(utils, 'LOG') as log:
-                self.assertRaises(RuntimeError, utils.execute,
-                                  ['ls'], log_fail_as_error=False)
-                self.assertTrue(log.debug.called)
+        self.mock_popen.return_value = ('', '')
+        self.process.return_value.returncode = 1
+        with mock.patch.object(utils, 'LOG') as log:
+            self.assertRaises(RuntimeError, utils.execute,
+                              ['ls'], log_fail_as_error=False)
+            self.assertFalse(log.error.called)
 
 
 class AgentUtilsGetInterfaceMAC(base.BaseTestCase):
@@ -172,7 +159,7 @@ class TestFindChildPids(base.BaseTestCase):
 
 class TestGetRoothelperChildPid(base.BaseTestCase):
     def _test_get_root_helper_child_pid(self, expected=_marker,
-                                        root_helper=None, pids=None):
+                                        run_as_root=False, pids=None):
         def _find_child_pids(x):
             if not pids:
                 return []
@@ -182,22 +169,22 @@ class TestGetRoothelperChildPid(base.BaseTestCase):
         mock_pid = object()
         with mock.patch.object(utils, 'find_child_pids',
                                side_effect=_find_child_pids):
-            actual = utils.get_root_helper_child_pid(mock_pid, root_helper)
+            actual = utils.get_root_helper_child_pid(mock_pid, run_as_root)
         if expected is _marker:
             expected = str(mock_pid)
         self.assertEqual(expected, actual)
 
-    def test_returns_process_pid_without_root_helper(self):
+    def test_returns_process_pid_not_root(self):
         self._test_get_root_helper_child_pid()
 
-    def test_returns_child_pid_with_root_helper(self):
+    def test_returns_child_pid_as_root(self):
         self._test_get_root_helper_child_pid(expected='2', pids=['1', '2'],
-                                             root_helper='a')
+                                             run_as_root=True)
 
-    def test_returns_last_child_pid_with_root_helper(self):
+    def test_returns_last_child_pid_as_root(self):
         self._test_get_root_helper_child_pid(expected='3',
                                              pids=['1', '2', '3'],
-                                             root_helper='a')
+                                             run_as_root=True)
 
-    def test_returns_none_with_root_helper(self):
-        self._test_get_root_helper_child_pid(expected=None, root_helper='a')
+    def test_returns_none_as_root(self):
+        self._test_get_root_helper_child_pid(expected=None, run_as_root=True)

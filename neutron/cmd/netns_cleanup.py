@@ -14,9 +14,7 @@
 #    under the License.
 
 import re
-
-import eventlet
-eventlet.monkey_patch()
+import time
 
 from oslo_config import cfg
 from oslo_utils import importutils
@@ -73,24 +71,21 @@ def setup_conf():
     return conf
 
 
-def _get_dhcp_process_monitor(config, root_helper):
+def _get_dhcp_process_monitor(config):
     return external_process.ProcessMonitor(
         config=config,
-        root_helper=root_helper,
         resource_type='dhcp')
 
 
 def kill_dhcp(conf, namespace):
     """Disable DHCP for a network if DHCP is still active."""
-    root_helper = agent_config.get_root_helper(conf)
     network_id = namespace.replace(dhcp.NS_PREFIX, '')
 
     dhcp_driver = importutils.import_object(
         conf.dhcp_driver,
         conf=conf,
-        process_monitor=_get_dhcp_process_monitor(conf, root_helper),
+        process_monitor=_get_dhcp_process_monitor(conf),
         network=dhcp.NetModel(conf.use_namespaces, {'id': network_id}),
-        root_helper=root_helper,
         plugin=FakeDhcpPlugin())
 
     if dhcp_driver.active:
@@ -117,12 +112,11 @@ def unplug_device(conf, device):
     try:
         device.link.delete()
     except RuntimeError:
-        root_helper = agent_config.get_root_helper(conf)
         # Maybe the device is OVS port, so try to delete
-        ovs = ovs_lib.BaseOVS(root_helper)
+        ovs = ovs_lib.BaseOVS()
         bridge_name = ovs.get_bridge_for_iface(device.name)
         if bridge_name:
-            bridge = ovs_lib.OVSBridge(bridge_name, root_helper)
+            bridge = ovs_lib.OVSBridge(bridge_name)
             bridge.delete_port(device.name)
         else:
             LOG.debug('Unable to find bridge for device: %s', device.name)
@@ -180,7 +174,7 @@ def main():
                   if eligible_for_deletion(conf, ns, conf.force)]
 
     if candidates:
-        eventlet.sleep(2)
+        time.sleep(2)
 
         for namespace in candidates:
             destroy_namespace(conf, namespace, conf.force)

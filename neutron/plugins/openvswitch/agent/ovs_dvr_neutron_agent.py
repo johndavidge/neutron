@@ -295,7 +295,7 @@ class OVSDVRNeutronAgent(dvr_rpc.DVRAgentRpcApiMixin):
                 self.phys_brs[physical_network].add_flow(
                     table=constants.DVR_NOT_LEARN_VLAN,
                     priority=2,
-                    dl_src=mac,
+                    dl_src=mac['mac_address'],
                     actions="output:%s" %
                     self.phys_ofports[physical_network])
 
@@ -313,7 +313,7 @@ class OVSDVRNeutronAgent(dvr_rpc.DVRAgentRpcApiMixin):
                 # result in flow explosions
                 self.tun_br.add_flow(table=constants.DVR_NOT_LEARN,
                                  priority=1,
-                                 dl_src=mac,
+                                 dl_src=mac['mac_address'],
                                  actions="output:%s" %
                                  self.patch_int_ofport)
             self.registered_dvr_macs.add(mac['mac_address'])
@@ -797,27 +797,6 @@ class OVSDVRNeutronAgent(dvr_rpc.DVRAgentRpcApiMixin):
             self.local_dvr_map.pop(sub_uuid, None)
         # release port state
         self.local_ports.pop(port.vif_id, None)
-
-    def _get_flow_args_by_version(self, ip_version, table,
-                                  vlan, subnet, priority, actions):
-        """
-        Get flow args for DVR by IP version.
-        priority and actions are optional to support both add_flows
-        and delete_flows
-        """
-        args = {'table': table,
-                'dl_vlan': vlan}
-        if ip_version == 4:
-            args['proto'] = 'ip'
-            args['nw_dst'] = subnet
-        else:
-            args['proto'] = 'ipv6'
-            args['ipv6_dst'] = subnet
-        if priority:
-            args['priority'] = priority
-        if actions:
-            args['actions'] = actions
-        return args
 
     def unbind_port_from_dvr(self, vif_port, local_vlan_map):
         if not self.in_distributed_mode():

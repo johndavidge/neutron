@@ -35,10 +35,8 @@ class IptablesManagerTestCase(base.BaseIPVethTestCase):
 
     def create_firewalls(self):
         client_iptables = iptables_manager.IptablesManager(
-            root_helper=self.root_helper,
             namespace=self.client_ns.namespace)
         server_iptables = iptables_manager.IptablesManager(
-            root_helper=self.root_helper,
             namespace=self.server_ns.namespace)
 
         return client_iptables, server_iptables
@@ -70,8 +68,7 @@ class IptablesManagerTestCase(base.BaseIPVethTestCase):
     def _test_with_nc(self, fw_manager, direction, port, udp):
         netcat = helpers.NetcatTester(self.client_ns, self.server_ns,
                                       self.DST_ADDRESS, self.port,
-                                      root_helper=self.root_helper,
-                                      udp=udp)
+                                      run_as_root=True, udp=udp)
         self.addCleanup(netcat.stop_processes)
         protocol = 'tcp'
         if udp:

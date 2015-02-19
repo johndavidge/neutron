@@ -33,7 +33,6 @@ class TestNetnsCleanup(base.BaseTestCase):
 
     def test_kill_dhcp(self, dhcp_active=True):
         conf = mock.Mock()
-        conf.AGENT.root_helper = 'sudo',
         conf.dhcp_driver = 'driver'
 
         method_to_patch = 'oslo_utils.importutils.import_object'
@@ -46,7 +45,6 @@ class TestNetnsCleanup(base.BaseTestCase):
             util.kill_dhcp(conf, 'ns')
 
             expected_params = {'conf': conf, 'network': mock.ANY,
-                               'root_helper': conf.AGENT.root_helper,
                                'plugin': mock.ANY,
                                'process_monitor': mock.ANY}
             import_object.assert_called_once_with('driver', **expected_params)
@@ -113,8 +111,7 @@ class TestNetnsCleanup(base.BaseTestCase):
                 util.unplug_device(conf, device)
 
                 mock_get_bridge_for_iface.assert_called_once_with('tap1')
-                ovs_br_cls.assert_called_once_with('br-int',
-                                                   conf.AGENT.root_helper)
+                ovs_br_cls.assert_called_once_with('br-int')
                 ovs_bridge.assert_has_calls(
                     [mock.call.delete_port(device.name)])
 
@@ -201,7 +198,7 @@ class TestNetnsCleanup(base.BaseTestCase):
         with mock.patch('neutron.agent.linux.ip_lib.IPWrapper') as ip_wrap:
             ip_wrap.get_namespaces.return_value = namespaces
 
-            with mock.patch('eventlet.sleep') as eventlet_sleep:
+            with mock.patch('time.sleep') as time_sleep:
                 conf = mock.Mock()
                 conf.force = False
                 methods_to_mock = dict(
@@ -226,14 +223,14 @@ class TestNetnsCleanup(base.BaseTestCase):
                         ip_wrap.assert_has_calls(
                             [mock.call.get_namespaces(conf.AGENT.root_helper)])
 
-                        eventlet_sleep.assert_called_once_with(2)
+                        time_sleep.assert_called_once_with(2)
 
     def test_main_no_candidates(self):
         namespaces = ['ns1', 'ns2']
         with mock.patch('neutron.agent.linux.ip_lib.IPWrapper') as ip_wrap:
             ip_wrap.get_namespaces.return_value = namespaces
 
-            with mock.patch('eventlet.sleep') as eventlet_sleep:
+            with mock.patch('time.sleep') as time_sleep:
                 conf = mock.Mock()
                 conf.force = False
                 methods_to_mock = dict(
@@ -256,4 +253,4 @@ class TestNetnsCleanup(base.BaseTestCase):
 
                         self.assertFalse(mocks['destroy_namespace'].called)
 
-                        self.assertFalse(eventlet_sleep.called)
+                        self.assertFalse(time_sleep.called)

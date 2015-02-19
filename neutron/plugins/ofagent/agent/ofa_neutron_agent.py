@@ -81,8 +81,8 @@ class LocalVLANMapping(object):
 
 
 class Bridge(flows.OFAgentIntegrationBridge, ovs_lib.OVSBridge):
-    def __init__(self, br_name, root_helper, ryuapp):
-        super(Bridge, self).__init__(br_name, root_helper)
+    def __init__(self, br_name, ryuapp):
+        super(Bridge, self).__init__(br_name)
         self.datapath_id = None
         self.datapath = None
         self.ryuapp = ryuapp
@@ -123,6 +123,9 @@ class Bridge(flows.OFAgentIntegrationBridge, ovs_lib.OVSBridge):
         self.get_datapath(retry_max)
 
 
+# RyuApp derives from `object`, but pylint can't see that without
+# having the ryu libraries available.
+# pylint: disable=super-on-old-class
 class OFANeutronAgentRyuApp(app_manager.RyuApp):
     OFP_VERSIONS = [ryu_ofp13.OFP_VERSION]
 
@@ -180,7 +183,7 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
     target = oslo_messaging.Target(version='1.1')
 
     def __init__(self, ryuapp, integ_br, local_ip,
-                 bridge_mappings, interface_mappings, root_helper,
+                 bridge_mappings, interface_mappings,
                  polling_interval, tunnel_types=None):
         """Constructor.
 
@@ -191,7 +194,6 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
                (deprecated)
         :param interface_mappings: mappings from physical network name to
                interface.
-        :param root_helper: utility to use when running shell cmds.
         :param polling_interval: interval (secs) to poll DB.
         :param tunnel_types: A list of tunnel types to enable support for in
                the agent. If set, will automatically set enable_tunneling to
@@ -199,7 +201,6 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         """
         super(OFANeutronAgent, self).__init__()
         self.ryuapp = ryuapp
-        self.root_helper = root_helper
         # TODO(yamamoto): Remove this VLAN leftover
         self.available_local_vlans = set(xrange(ofa_const.LOCAL_VLAN_MIN,
                                                 ofa_const.LOCAL_VLAN_MAX))
@@ -225,7 +226,7 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         # Keep track of int_br's device count for use by _report_state()
         self.int_br_device_count = 0
 
-        self.int_br = Bridge(integ_br, self.root_helper, self.ryuapp)
+        self.int_br = Bridge(integ_br, self.ryuapp)
         # Stores port update notifications for processing in main loop
         self.updated_ports = set()
         self.setup_rpc()
@@ -246,8 +247,7 @@ class OFANeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
 
         # Security group agent support
         self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
-                self.sg_plugin_rpc, self.root_helper,
-                defer_refresh_firewall=True)
+                self.sg_plugin_rpc, defer_refresh_firewall=True)
         # Initialize iteration counter
         self.iter_num = 0
 
@@ -906,7 +906,6 @@ def create_agent_config_map(config):
         local_ip=config.OVS.local_ip,
         interface_mappings=interface_mappings,
         bridge_mappings=bridge_mappings,
-        root_helper=config.AGENT.root_helper,
         polling_interval=config.AGENT.polling_interval,
         tunnel_types=config.AGENT.tunnel_types,
     )

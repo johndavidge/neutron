@@ -49,7 +49,7 @@ class IVSBridge(ovs_lib.OVSBridge):
     def run_vsctl(self, args, check_error=False):
         full_args = ["ivs-ctl"] + args
         try:
-            return utils.execute(full_args, root_helper=self.root_helper)
+            return utils.execute(full_args, run_as_root=True)
         except Exception as e:
             with excutils.save_and_reraise_exception() as ctxt:
                 LOG.error(_LE("Unable to execute %(cmd)s. "
@@ -75,17 +75,16 @@ class RestProxyAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin):
 
     target = oslo_messaging.Target(version='1.1')
 
-    def __init__(self, integ_br, polling_interval, root_helper, vs='ovs'):
+    def __init__(self, integ_br, polling_interval, vs='ovs'):
         super(RestProxyAgent, self).__init__()
         self.polling_interval = polling_interval
         self._setup_rpc()
         self.sg_agent = sg_rpc.SecurityGroupAgentRpc(self.context,
-                                                     self.sg_plugin_rpc,
-                                                     root_helper)
+                                                     self.sg_plugin_rpc)
         if vs == 'ivs':
-            self.int_br = IVSBridge(integ_br, root_helper)
+            self.int_br = IVSBridge(integ_br)
         else:
-            self.int_br = ovs_lib.OVSBridge(integ_br, root_helper)
+            self.int_br = ovs_lib.OVSBridge(integ_br)
 
     def _setup_rpc(self):
         self.topic = topics.AGENT
@@ -158,8 +157,7 @@ def main():
 
     integ_br = cfg.CONF.RESTPROXYAGENT.integration_bridge
     polling_interval = cfg.CONF.RESTPROXYAGENT.polling_interval
-    root_helper = cfg.CONF.AGENT.root_helper
-    bsnagent = RestProxyAgent(integ_br, polling_interval, root_helper,
+    bsnagent = RestProxyAgent(integ_br, polling_interval,
                               cfg.CONF.RESTPROXYAGENT.virtual_switch_type)
     bsnagent.daemon_loop()
     sys.exit(0)
