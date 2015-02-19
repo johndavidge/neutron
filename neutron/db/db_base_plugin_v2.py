@@ -1215,7 +1215,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 if "router_interface" in port['device_owner']:
                     for ip in port['fixed_ips']:
                         if (ip['ip_address'] == "::"
-                            and ip ['subnet_id'] == s['id']):
+                            and ip['subnet_id'] == s['id']):
                             new_port = {}
                             new_port['port'] = port
                             fixed_ips = []
@@ -1223,7 +1223,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                             fixed_ip['subnet_id'] = s['id']
                             fixed_ip['ip_address'] = s['gateway_ip']
                             fixed_ips.append(fixed_ip)
-                            new_port['port']['fixed_ips'] = fixed_ips 
+                            new_port['port']['fixed_ips'] = fixed_ips
                             routers.append(port['device_id'])
                             self.update_port(context, port['id'], new_port)
 

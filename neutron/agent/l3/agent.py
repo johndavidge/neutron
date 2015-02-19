@@ -33,8 +33,8 @@ from neutron.agent.l3 import legacy_router
 from neutron.agent.l3 import router_processing_queue as queue
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
-from neutron.agent.linux import ra
 from neutron.agent.linux import pd
+from neutron.agent.linux import ra
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.agent import rpc as agent_rpc
 from neutron.common import constants as l3_constants
@@ -126,6 +126,7 @@ class L3PluginApi(object):
         cctxt = self.client.prepare(version='1.3')
         return cctxt.call(context, 'process_prefix_update',
                           subnets=prefix_update)
+
 
 class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                  ha.AgentMixin,
@@ -1290,8 +1291,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     else:
                         self.pd_client_pending = True
                 if pdo['notify_neutron']:
-                   prefix_update[subnet_id] = pdo['prefix']
-                   pdo['notify_neutron'] = False
+                    prefix_update[subnet_id] = pdo['prefix']
+                    pdo['notify_neutron'] = False
 
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)

@@ -86,7 +86,7 @@ class ProcessManager(object):
         if self.active:
             if cmd_callback:
                 cmd = cmd_callback(self.get_pid_file_name())
-                ip_wrapper = ip_lib.IPWrapper(self.root_helper, self.namespace)
+                ip_wrapper = ip_lib.IPWrapper(namespace=self.namespace)
                 ip_wrapper.netns.execute(cmd, addl_env=self.cmd_addl_env)
             else:
                 cmd = ['kill', '-%s' % (sig), pid]
