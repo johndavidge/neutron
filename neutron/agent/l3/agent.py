@@ -301,7 +301,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             ri.radvd.disable()
         for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
             if pdo['client_started']:
-                pd.disable_ipv6_pd(router_id, ns, subnet_id, self.root_helper)
+                pd.disable_ipv6_pd(router_id, ns, subnet_id)
 
         ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
@@ -546,8 +546,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             if subnet_id in ri.pd_enabled_subnet:
                 pdo = ri.pd_enabled_subnet[subnet_id]
                 if pdo['client_started']:
-                    pd.disable_ipv6_pd(ri.router_id, ri.ns_name,
-                                       subnet_id, self.root_helper)
+                    pd.disable_ipv6_pd(ri.router_id, ri.ns_name, subnet_id)
                     self._delete_lla_address_for_pd(ri, pdo['mac'],
                                                     ex_gw_ifname)
                 self._remove_pd_enabled_subnet(ri, subnet_id)
@@ -1285,8 +1284,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     lla = self._get_lla(pdo['mac'])
                     if self._ensure_lla('%s/64' % lla, llas):
                         pd.enable_ipv6_pd(ri.router_id, ri.ns_name,
-                                          subnet_id, self.root_helper,
-                                          ex_gw_ifname, lla)
+                                          subnet_id, ex_gw_ifname, lla)
                         pdo['client_started'] = True
                     else:
                         self.pd_client_pending = True

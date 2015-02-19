@@ -90,7 +90,7 @@ class ProcessManager(object):
                 ip_wrapper.netns.execute(cmd, addl_env=self.cmd_addl_env)
             else:
                 cmd = ['kill', '-%s' % (sig), pid]
-                utils.execute(cmd, self.root_helper)
+                utils.execute(cmd, run_as_root=True)
                 # In the case of shutting down, remove the pid file
                 if sig == '9':
                     fileutils.delete_if_exists(self.get_pid_file_name())
