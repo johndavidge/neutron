@@ -148,7 +148,14 @@ def disable_ipv6_pd(router_id, router_ns, subnet_id, root_helper):
                                    router_ns,
                                    'dibbler',
                                    pid_file=_get_pid_path(subnet_id))
-    dibbler.disable()
+
+    def callback(pid_file):
+        dibbler_cmd = ['dibbler-client',
+                       'stop',
+                       '-W', '%s' % dcwa]
+        return dibbler_cmd
+
+    dibbler.disable(cmd_callback=callback)
     shutil.rmtree(dcwa, ignore_errors=True)
     LOG.debug("dibbler client disabled for router %s subnet %s",
               router_id, subnet_id)

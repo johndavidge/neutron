@@ -483,13 +483,15 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     netaddr.IPNetwork(p['subnet']['cidr']).version == 6):
                 old_ipv6_port = True
 
+        # Process PD
+        if pd_enabled or update_ports:
+            new_ipv6_port = (new_ipv6_port or
+                             self._process_pd(ri, update_ports,
+                                              old_pd_enabled_subnet))
+
         # Enable RA
         if new_ipv6_port or old_ipv6_port:
             ri.radvd.enable(internal_ports)
-
-        # Process PD
-        if pd_enabled:
-            self._process_pd(ri, update_ports, old_pd_enabled_subnet)
 
         existing_devices = self._get_existing_devices(ri)
         current_internal_devs = set([n for n in existing_devices
@@ -525,13 +527,16 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
     def _process_pd(self, ri, update_ports, old_pd_enabled_subnet):
         # When router port ip addresses become assigned, configure the ports
         # with ip addresses.
+        port_assigned = False
         for p in update_ports:
             subnet_id = p['subnet']['id']
             if (p['subnet']['cidr'] != l3_constants.TEMP_PD_PREFIX and
                 subnet_id in ri.pd_enabled_subnet and
                 not ri.pd_enabled_subnet[subnet_id]['port_assigned']):
+                self._set_subnet_info(p)
                 self.internal_network_updated(ri, p)
                 ri.pd_enabled_subnet[subnet_id]['port_assigned'] = True
+                port_assigned = True
 
         ex_gw_ifname = self._get_external_device_interface_name(
                                 ri, self._get_ex_gw_port(ri))
@@ -546,6 +551,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                     self._delete_lla_address_for_pd(ri, pdo['mac'],
                                                     ex_gw_ifname)
                 self._remove_pd_enabled_subnet(ri, subnet_id)
+        return port_assigned
 
     def _process_external_gateway(self, ri):
         ex_gw_port = self._get_ex_gw_port(ri)
@@ -1019,7 +1025,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                                        self.conf.send_arp_for_ha,
                                        self.root_helper)
 
-    def internale_network_updated(self, ri, port):
+    def internal_network_updated(self, ri, port):
         port_id = port['id']
         internal_cidr = port['ip_cidr']
 
