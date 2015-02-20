@@ -1198,38 +1198,15 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         s['ip_version'] = db_subnet.ip_version
         s['id'] = db_subnet.id
 
+        update_ports_needed = False
         if s.get('cidr') is None:
             s['cidr'] = db_subnet.cidr
         else:
+            update_ports_needed = True
             # This update has been triggered by a new Prefix Delegation
             net = netaddr.IPNetwork(subnet['subnet']['cidr'])
             s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
-            s['allocation_pools'] = self._allocate_pools_for_subnet(context,
-                                                                    s)
-
-            # Find router interface ports that have not yet been updated
-            # with an IP address by Prefix Delegation, and update them
-            ports = self.get_ports(context)
-            routers = []
-            for port in ports:
-                if "router_interface" in port['device_owner']:
-                    for ip in port['fixed_ips']:
-                        if (ip['ip_address'] == "::"
-                            and ip['subnet_id'] == s['id']):
-                            new_port = {}
-                            new_port['port'] = port
-                            fixed_ips = []
-                            fixed_ip = {}
-                            fixed_ip['subnet_id'] = s['id']
-                            fixed_ip['ip_address'] = s['gateway_ip']
-                            fixed_ips.append(fixed_ip)
-                            new_port['port']['fixed_ips'] = fixed_ips
-                            routers.append(port['device_id'])
-                            self.update_port(context, port['id'], new_port)
-
-            # Send router_update to l3_agent
-            l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
-            l3_rpc_notifier.routers_updated(context, routers)
+            s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
 
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
@@ -1263,6 +1240,33 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             result['host_routes'] = new_routes
         if changed_allocation_pools:
             result['allocation_pools'] = new_pools
+
+        if update_ports_needed:
+            # Find ports that have not yet been updated
+            # with an IP address by Prefix Delegation, and update them
+            ports = self.get_ports(context)
+            routers = []
+            for port in ports:
+                for ip in port['fixed_ips']:
+                    if (ip['ip_address'].startswith("::")
+                        and ip ['subnet_id'] == s['id']):
+                        new_port = {}
+                        new_port['port'] = port
+                        fixed_ips = []
+                        fixed_ip = {}
+                        fixed_ip['subnet_id'] = s['id']
+                        if "router_interface" in port['device_owner']:
+                             routers.append(port['device_id'])
+                             fixed_ip['ip_address'] = s['gateway_ip']
+                        fixed_ips.append(fixed_ip)
+                        new_port['port']['fixed_ips'] = fixed_ips
+                        self.update_port(context, port['id'], new_port)
+
+            # Send router_update to l3_agent
+            if routers:
+                l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
+                l3_rpc_notifier.routers_updated(context, routers)
+
         return result
 
     def _subnet_check_ip_allocations(self, context, subnet_id):
