@@ -1248,8 +1248,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             routers = []
             for port in ports:
                 for ip in port['fixed_ips']:
-                    if (ip['ip_address'].startswith("::")
-                        and ip ['subnet_id'] == s['id']):
+                    if (ip['subnet_id'] == s['id']):
                         new_port = {}
                         new_port['port'] = port
                         fixed_ips = []
