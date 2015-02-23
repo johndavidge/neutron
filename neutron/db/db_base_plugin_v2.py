@@ -819,6 +819,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                'host_routes': [{'destination': route['destination'],
                                 'nexthop': route['nexthop']}
                                for route in subnet['routes']],
+               'pd_enabled': subnet['pd_enabled'],
                'shared': subnet['shared']
                }
         # Call auxiliary extend functions, if any
