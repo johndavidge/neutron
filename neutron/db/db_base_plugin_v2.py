@@ -681,7 +681,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         pools = []
         # Auto allocate the pool around gateway_ip
         net = netaddr.IPNetwork(subnet['cidr'])
-        first_ip = net.first + 1
+        # Allow for subnets with temporary Prefix Delegation CIDRs
+        if subnet['cidr'] == constants.TEMP_PD_PREFIX:
+            first_ip = netaddr.IPAddress('::1')
+        else:
+            first_ip = net.first + 1
         last_ip = net.last - 1
         gw_ip = int(netaddr.IPAddress(subnet['gateway_ip'] or net.last))
         # Use the gw_ip to find a point for splitting allocation pools
@@ -1044,9 +1048,15 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         s = subnet['subnet']
 
         # Allow for temporary CIDRs used for Prefix Delegation
-        # Make sure gateway_ip is None
         if subnet['subnet']['cidr'] == constants.TEMP_PD_PREFIX:
+            # Make sure gateway_ip is None
             s['gateway_ip'] = None
+            # Make sure RA and Address modes are SLAAC,
+            # unless stateless has been set
+            if not s['ipv6_ra_mode'] == 'stateless':
+                s['ipv6_ra_mode'] = 'slaac'
+            if not s['ipv6_address_mode'] == 'stateless':
+                s['ipv6_address_mode'] = 'slaac'
 
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
             s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
@@ -1210,7 +1220,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
-        if s.get('gateway_ip') is not None and s.get('cidr') is None:
+        if s.get('gateway_ip') is not None and not update_ports_needed:
             allocation_pools = [{'start': p['first_ip'], 'end': p['last_ip']}
                                 for p in db_subnet.allocation_pools]
             self._validate_gw_out_of_pools(s["gateway_ip"], allocation_pools)
