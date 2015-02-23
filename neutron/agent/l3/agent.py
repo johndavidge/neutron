@@ -296,12 +296,12 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
     def _destroy_router_namespace(self, ns):
         router_id = self.get_router_id(ns)
-        ri = self.router_info[router_id]
         if router_id in self.router_info:
+            ri = self.router_info[router_id]
             ri.radvd.disable()
-        for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
-            if pdo['client_started']:
-                pd.disable_ipv6_pd(router_id, ns, subnet_id)
+            for subnet_id, pdo in ri.pd_enabled_subnet.iteritems():
+                if pdo['client_started']:
+                    pd.disable_ipv6_pd(router_id, ns, subnet_id)
 
         ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
@@ -484,7 +484,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 old_ipv6_port = True
 
         # Process PD
-        if pd_enabled or update_ports:
+        if pd_enabled:
             new_ipv6_port = (new_ipv6_port or
                              self._process_pd(ri, update_ports,
                                               old_pd_enabled_subnet))
