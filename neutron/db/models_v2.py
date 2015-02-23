@@ -199,6 +199,7 @@ class Subnet(model_base.BASEV2, HasId, HasTenant):
                               cascade='all, delete, delete-orphan',
                               lazy='joined')
     shared = sa.Column(sa.Boolean)
+    pd_enabled = sa.Column(sa.Boolean)
     ipv6_ra_mode = sa.Column(sa.Enum(constants.IPV6_SLAAC,
                                      constants.DHCPV6_STATEFUL,
                                      constants.DHCPV6_STATELESS,

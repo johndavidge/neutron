@@ -393,8 +393,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 subnet_id = subnet['id']
 
             if 'ip_address' in fixed:
-                # Ignore temporary Prefix Delegation CIDRs
-                if not subnet['cidr'] == constants.TEMP_PD_PREFIX:
+                # Ignore Prefix Delegation enabled subnets
+                if not subnet['pd_enabled']:
                     # Ensure that the IP's are unique
                     if not NeutronDbPluginV2._check_unique_ip(
                                              context,
@@ -1043,9 +1043,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         subnet['subnet']['cidr'] = '%s/%s' % (net.network, net.prefixlen)
 
         s = subnet['subnet']
+        s['pd_enabled'] = False
 
-        # Allow for temporary CIDRs used for Prefix Delegation
+        # Check for temporary CIDRs used for Prefix Delegation
         if subnet['subnet']['cidr'] == constants.TEMP_PD_PREFIX:
+            s['pd_enabled'] = True
             # Make sure ip_version is set to 6
             s['ip_version'] = 6
             # Make sure RA and Address modes are SLAAC,
@@ -1075,12 +1077,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         tenant_id = self._get_tenant_id_for_create(context, s)
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, s["network_id"])
-            # Do not check for CIDR overlap if subnet has a temp
-            # Prefix Delegation CIDR
-            if subnet['subnet']['cidr'] != constants.TEMP_PD_PREFIX:
+            # Do not check for CIDR overlap if subnet is PD enabled
+            if not s['pd_enabled']:
                 self._validate_subnet_cidr(context, network, s['cidr'])
-            # The 'shared' attribute for subnets is for internal plugin
-            # use only. It is not exposed through the API
+            # The 'shared' and 'pd_enabled' attributes for subnets are for
+            # internal plugin use only. They are not exposed through the API
             args = {'tenant_id': tenant_id,
                     'id': s.get('id') or uuidutils.generate_uuid(),
                     'name': s['name'],
@@ -1089,6 +1090,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                     'cidr': s['cidr'],
                     'enable_dhcp': s['enable_dhcp'],
                     'gateway_ip': s['gateway_ip'],
+                    'pd_enabled': s['pd_enabled'],
                     'shared': network.shared}
             if s['ip_version'] == 6 and s['enable_dhcp']:
                 if attributes.is_attr_set(s['ipv6_ra_mode']):

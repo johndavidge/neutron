@@ -460,7 +460,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         old_ipv6_port = False
         pd_enabled = False
         for p in new_ports:
-            if p['subnet']['cidr'] == l3_constants.TEMP_PD_PREFIX:
+            if p['subnet']['pd_enabled']:
                 pd_enabled = True
                 self._add_pd_enabled_subnet(ri, p['id'],
                                             p['mac_address'], p['subnet'])
@@ -474,7 +474,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         old_pd_enabled_subnet = []
         for p in old_ports:
-            if p['subnet']['cidr'] == l3_constants.TEMP_PD_PREFIX:
+            if p['subnet']['pd_enabled']:
                 pd_enabled = True
                 old_pd_enabled_subnet.append(p['subnet']['id'])
             self.internal_network_removed(ri, p)
