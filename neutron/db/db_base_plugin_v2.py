@@ -22,6 +22,7 @@ from sqlalchemy import event
 from sqlalchemy import orm
 from sqlalchemy.orm import exc
 
+from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.v2 import attributes
 from neutron.common import constants
 from neutron.common import exceptions as n_exc
@@ -392,29 +393,35 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 subnet_id = subnet['id']
 
             if 'ip_address' in fixed:
-                # Ensure that the IP's are unique
-                if not NeutronDbPluginV2._check_unique_ip(context, network_id,
-                                                          subnet_id,
-                                                          fixed['ip_address']):
-                    raise n_exc.IpAddressInUse(net_id=network_id,
-                                               ip_address=fixed['ip_address'])
+                # Ignore Prefix Delegation enabled subnets
+                if not subnet['pd_enabled']:
+                    # Ensure that the IP's are unique
+                    if not NeutronDbPluginV2._check_unique_ip(
+                                             context,
+                                             network_id,
+                                             subnet_id,
+                                             fixed['ip_address']):
+                        raise n_exc.IpAddressInUse(
+                                    net_id=network_id,
+                                    ip_address=fixed['ip_address'])
 
-                # Ensure that the IP is valid on the subnet
-                if (not found and
-                    not self._check_subnet_ip(subnet['cidr'],
-                                              fixed['ip_address'])):
-                    msg = _('IP address %s is not a valid IP for the defined '
-                            'subnet') % fixed['ip_address']
-                    raise n_exc.InvalidInput(error_message=msg)
-                if (ipv6_utils.is_auto_address_subnet(subnet) and
-                    device_owner not in
-                        constants.ROUTER_INTERFACE_OWNERS):
-                    msg = (_("IPv6 address %(address)s can not be directly "
-                            "assigned to a port on subnet %(id)s since the "
-                            "subnet is configured for automatic addresses") %
-                           {'address': fixed['ip_address'],
-                            'id': subnet_id})
-                    raise n_exc.InvalidInput(error_message=msg)
+                    # Ensure that the IP is valid on the subnet
+                    if (not found and
+                        not self._check_subnet_ip(subnet['cidr'],
+                                                  fixed['ip_address'])):
+                        msg = _('IP address %s is not a valid IP for the '
+                                'defined subnet') % fixed['ip_address']
+                        raise n_exc.InvalidInput(error_message=msg)
+                    if (ipv6_utils.is_auto_address_subnet(subnet) and
+                        device_owner not in
+                            constants.ROUTER_INTERFACE_OWNERS):
+                        msg = (_("IPv6 address %(address)s can not be "
+                                 "directly assigned to a port on subnet "
+                                 "%(id)s since the subnet is configured for "
+                                 "automatic addresses") %
+                               {'address': fixed['ip_address'],
+                                'id': subnet_id})
+                        raise n_exc.InvalidInput(error_message=msg)
                 fixed_ip_set.append({'subnet_id': subnet_id,
                                      'ip_address': fixed['ip_address']})
             else:
@@ -672,20 +679,21 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         defining the pool range.
         """
         pools = []
+        v = subnet['ip_version']
         # Auto allocate the pool around gateway_ip
-        net = netaddr.IPNetwork(subnet['cidr'])
+        net = netaddr.IPNetwork(subnet['cidr'], v)
         first_ip = net.first + 1
         last_ip = net.last - 1
-        gw_ip = int(netaddr.IPAddress(subnet['gateway_ip'] or net.last))
+        gw_ip = int(netaddr.IPAddress(subnet['gateway_ip'] or net.last, v))
         # Use the gw_ip to find a point for splitting allocation pools
         # for this subnet
         split_ip = min(max(gw_ip, net.first), net.last)
         if split_ip > first_ip:
-            pools.append({'start': str(netaddr.IPAddress(first_ip)),
-                          'end': str(netaddr.IPAddress(split_ip - 1))})
+            pools.append({'start': str(netaddr.IPAddress(first_ip, v)),
+                          'end': str(netaddr.IPAddress(split_ip - 1, v))})
         if split_ip < last_ip:
-            pools.append({'start': str(netaddr.IPAddress(split_ip + 1)),
-                          'end': str(netaddr.IPAddress(last_ip))})
+            pools.append({'start': str(netaddr.IPAddress(split_ip + 1, v)),
+                          'end': str(netaddr.IPAddress(last_ip, v))})
         # return auto-generated pools
         # no need to check for their validity
         return pools
@@ -811,6 +819,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                'host_routes': [{'destination': route['destination'],
                                 'nexthop': route['nexthop']}
                                for route in subnet['routes']],
+               'pd_enabled': subnet['pd_enabled'],
                'shared': subnet['shared']
                }
         # Call auxiliary extend functions, if any
@@ -1035,9 +1044,26 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         subnet['subnet']['cidr'] = '%s/%s' % (net.network, net.prefixlen)
 
         s = subnet['subnet']
+        s['pd_enabled'] = False
+
+        # Check for temporary CIDRs used for Prefix Delegation
+        if subnet['subnet']['cidr'] == constants.TEMP_PD_PREFIX:
+            s['pd_enabled'] = True
+            # Make sure ip_version is set to 6
+            s['ip_version'] = 6
+            # Make sure RA and Address modes are SLAAC,
+            # unless stateless has been set
+            if not s['ipv6_ra_mode'] == 'stateless':
+                s['ipv6_ra_mode'] = 'slaac'
+            if not s['ipv6_address_mode'] == 'stateless':
+                s['ipv6_address_mode'] = 'slaac'
+
+        if s['ip_version'] is None:
+            s['ip_version'] = 4
 
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
-            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
+            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1,
+                                                    s['ip_version']))
 
         if s['allocation_pools'] == attributes.ATTR_NOT_SPECIFIED:
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
@@ -1052,9 +1078,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         tenant_id = self._get_tenant_id_for_create(context, s)
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, s["network_id"])
-            self._validate_subnet_cidr(context, network, s['cidr'])
-            # The 'shared' attribute for subnets is for internal plugin
-            # use only. It is not exposed through the API
+            # Do not check for CIDR overlap if subnet is PD enabled
+            if not s['pd_enabled']:
+                self._validate_subnet_cidr(context, network, s['cidr'])
+            # The 'shared' and 'pd_enabled' attributes for subnets are for
+            # internal plugin use only. They are not exposed through the API
             args = {'tenant_id': tenant_id,
                     'id': s.get('id') or uuidutils.generate_uuid(),
                     'name': s['name'],
@@ -1063,6 +1091,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                     'cidr': s['cidr'],
                     'enable_dhcp': s['enable_dhcp'],
                     'gateway_ip': s['gateway_ip'],
+                    'pd_enabled': s['pd_enabled'],
                     'shared': network.shared}
             if s['ip_version'] == 6 and s['enable_dhcp']:
                 if attributes.is_attr_set(s['ipv6_ra_mode']):
@@ -1181,11 +1210,21 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         # value since _validate_subnet() expects subnet spec has 'ip_version'
         # and 'allocation_pools' fields.
         s['ip_version'] = db_subnet.ip_version
-        s['cidr'] = db_subnet.cidr
         s['id'] = db_subnet.id
+
+        update_ports_needed = False
+        if s.get('cidr') is None:
+            s['cidr'] = db_subnet.cidr
+        else:
+            update_ports_needed = True
+            # This update has been triggered by a new Prefix Delegation
+            net = netaddr.IPNetwork(subnet['subnet']['cidr'])
+            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
+            s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
+
         self._validate_subnet(context, s, cur_subnet=db_subnet)
 
-        if s.get('gateway_ip') is not None:
+        if s.get('gateway_ip') is not None and not update_ports_needed:
             allocation_pools = [{'start': p['first_ip'], 'end': p['last_ip']}
                                 for p in db_subnet.allocation_pools]
             self._validate_gw_out_of_pools(s["gateway_ip"], allocation_pools)
@@ -1215,6 +1254,32 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             result['host_routes'] = new_routes
         if changed_allocation_pools:
             result['allocation_pools'] = new_pools
+
+        if update_ports_needed:
+            # Find ports that have not yet been updated
+            # with an IP address by Prefix Delegation, and update them
+            ports = self.get_ports(context)
+            routers = []
+            for port in ports:
+                for ip in port['fixed_ips']:
+                    if (ip['subnet_id'] == s['id']):
+                        new_port = {}
+                        new_port['port'] = port
+                        fixed_ips = []
+                        fixed_ip = {}
+                        fixed_ip['subnet_id'] = s['id']
+                        if "router_interface" in port['device_owner']:
+                             routers.append(port['device_id'])
+                             fixed_ip['ip_address'] = s['gateway_ip']
+                        fixed_ips.append(fixed_ip)
+                        new_port['port']['fixed_ips'] = fixed_ips
+                        self.update_port(context, port['id'], new_port)
+
+            # Send router_update to l3_agent
+            if routers:
+                l3_rpc_notifier = l3_rpc_agent_api.L3AgentNotifyAPI()
+                l3_rpc_notifier.routers_updated(context, routers)
+
         return result
 
     def _subnet_check_ip_allocations(self, context, subnet_id):

@@ -451,21 +451,25 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                         msg = (_("Router already has a port on subnet %s")
                                % subnet_id)
                         raise n_exc.BadRequest(resource='router', msg=msg)
-                    sub_id = ip['subnet_id']
-                    cidr = self._core_plugin._get_subnet(context.elevated(),
-                                                         sub_id)['cidr']
-                    ipnet = netaddr.IPNetwork(cidr)
-                    match1 = netaddr.all_matching_cidrs(new_ipnet, [cidr])
-                    match2 = netaddr.all_matching_cidrs(ipnet, [subnet_cidr])
-                    if match1 or match2:
-                        data = {'subnet_cidr': subnet_cidr,
-                                'subnet_id': subnet_id,
-                                'cidr': cidr,
-                                'sub_id': sub_id}
-                        msg = (_("Cidr %(subnet_cidr)s of subnet "
-                                 "%(subnet_id)s overlaps with cidr %(cidr)s "
-                                 "of subnet %(sub_id)s") % data)
-                        raise n_exc.BadRequest(resource='router', msg=msg)
+                    # Ignore temporary Prefix Delegation CIDRs
+                    if not subnet_cidr == l3_constants.TEMP_PD_PREFIX:
+                        sub_id = ip['subnet_id']
+                        cidr = self._core_plugin._get_subnet(
+                                                 context.elevated(),
+                                                 sub_id)['cidr']
+                        ipnet = netaddr.IPNetwork(cidr)
+                        match1 = netaddr.all_matching_cidrs(new_ipnet, [cidr])
+                        match2 = netaddr.all_matching_cidrs(ipnet,
+                                                            [subnet_cidr])
+                        if match1 or match2:
+                            data = {'subnet_cidr': subnet_cidr,
+                                    'subnet_id': subnet_id,
+                                    'cidr': cidr,
+                                    'sub_id': sub_id}
+                            msg = (_("Cidr %(subnet_cidr)s of subnet "
+                                     "%(subnet_id)s overlaps with cidr "
+                                     "%(cidr)s of subnet %(sub_id)s") % data)
+                            raise n_exc.BadRequest(resource='router', msg=msg)
         except exc.NoResultFound:
             pass
 
@@ -508,8 +512,10 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
     def _add_interface_by_subnet(self, context, router, subnet_id, owner):
         subnet = self._core_plugin._get_subnet(context, subnet_id)
         if not subnet['gateway_ip']:
-            msg = _('Subnet for router interface must have a gateway IP')
-            raise n_exc.BadRequest(resource='router', msg=msg)
+            # Ignore temporary Prefix Delegation CIDRs
+            if not subnet['cidr'] == l3_constants.TEMP_PD_PREFIX:
+                msg = _('Subnet for router interface must have a gateway IP')
+                raise n_exc.BadRequest(resource='router', msg=msg)
         if (subnet['ip_version'] == 6 and subnet['ipv6_ra_mode'] is None
                 and subnet['ipv6_address_mode'] is not None):
             msg = (_('IPv6 subnet %s configured to receive RAs from an '
@@ -520,8 +526,12 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                                           subnet['network_id'],
                                           subnet_id,
                                           subnet['cidr'])
-        fixed_ip = {'ip_address': subnet['gateway_ip'],
-                    'subnet_id': subnet['id']}
+        if subnet['cidr'] == l3_constants.TEMP_PD_PREFIX:
+            fixed_ip = {'ip_address': l3_constants.TEMP_PD_ADDRESS,
+                        'subnet_id': subnet['id']}
+        else:
+            fixed_ip = {'ip_address': subnet['gateway_ip'],
+                        'subnet_id': subnet['id']}
 
         return self._core_plugin.create_port(context, {
             'port':
@@ -1086,7 +1096,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
         network_ids = set(p['network_id'] for p, _ in each_port_with_ip())
         filters = {'network_id': [id for id in network_ids]}
         fields = ['id', 'cidr', 'gateway_ip',
-                  'network_id', 'ipv6_ra_mode']
+                  'network_id', 'ipv6_ra_mode', 'pd_enabled']
 
         subnets_by_network = dict((id, []) for id in network_ids)
         for subnet in self._core_plugin.get_subnets(context, filters, fields):
@@ -1098,7 +1108,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                 subnet_info = {'id': subnet['id'],
                                'cidr': subnet['cidr'],
                                'gateway_ip': subnet['gateway_ip'],
-                               'ipv6_ra_mode': subnet['ipv6_ra_mode']}
+                               'ipv6_ra_mode': subnet['ipv6_ra_mode'],
+                               'pd_enabled': subnet['pd_enabled']}
 
                 if subnet['id'] == fixed_ip['subnet_id']:
                     port['subnet'] = subnet_info

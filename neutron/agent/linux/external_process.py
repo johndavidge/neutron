@@ -80,15 +80,20 @@ class ProcessManager(object):
     def reload_cfg(self):
         self.disable('HUP')
 
-    def disable(self, sig='9'):
+    def disable(self, sig='9', cmd_callback=None):
         pid = self.pid
 
         if self.active:
-            cmd = ['kill', '-%s' % (sig), pid]
-            utils.execute(cmd, run_as_root=True)
-            # In the case of shutting down, remove the pid file
-            if sig == '9':
-                fileutils.delete_if_exists(self.get_pid_file_name())
+            if cmd_callback:
+                cmd = cmd_callback(self.get_pid_file_name())
+                ip_wrapper = ip_lib.IPWrapper(namespace=self.namespace)
+                ip_wrapper.netns.execute(cmd, addl_env=self.cmd_addl_env)
+            else:
+                cmd = ['kill', '-%s' % (sig), pid]
+                utils.execute(cmd, run_as_root=True)
+                # In the case of shutting down, remove the pid file
+                if sig == '9':
+                    fileutils.delete_if_exists(self.get_pid_file_name())
         elif pid:
             LOG.debug('Process for %(uuid)s pid %(pid)d is stale, ignoring '
                       'signal %(signal)s', {'uuid': self.uuid, 'pid': pid,
@@ -182,7 +187,7 @@ class ProcessMonitor(object):
         # replace the old process manager with the new one
         self._process_managers[service_id] = process_manager
 
-    def disable(self, uuid, namespace=None, service=None,
+    def disable(self, uuid, cmd_callback=None, namespace=None, service=None,
                 pid_file=None):
         """Disables the process and stops monitoring it."""
         service_id = ServiceId(uuid, service)
@@ -194,7 +199,7 @@ class ProcessMonitor(object):
             namespace=namespace)
         self._process_managers.pop(service_id, None)
 
-        process_manager.disable()
+        process_manager.disable(cmd_callback=cmd_callback)
 
     def disable_all(self):
         for service_id in self._process_managers.keys():
