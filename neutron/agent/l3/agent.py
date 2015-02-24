@@ -305,7 +305,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         if router_id in self.router_info:
             ri = self.router_info[router_id]
             ri.radvd.disable()
-        ns_ip = ip_lib.IPWrapper(self.root_helper, namespace=ns)
+        ns_ip = ip_lib.IPWrapper(namespace=ns)
         for d in ns_ip.get_devices(exclude_loopback=True):
             if d.name.startswith(INTERNAL_DEV_PREFIX):
                 # device is on default bridge
