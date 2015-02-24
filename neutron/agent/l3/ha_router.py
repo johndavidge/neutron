@@ -20,6 +20,7 @@ from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import keepalived
 from neutron.agent.metadata import driver as metadata_driver
+from neutron.common import utils as common_utils
 from neutron.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
@@ -71,8 +72,7 @@ class HaRouter(router.RouterInfo):
             self.router['id'],
             keepalived.KeepalivedConf(),
             conf_path=self.agent_conf.ha_confs_path,
-            namespace=self.ns_name,
-            root_helper=self.root_helper)
+            namespace=self.ns_name)
 
     def _init_keepalived_manager(self):
         # TODO(Carl) This looks a bit funny, doesn't it?
@@ -165,6 +165,9 @@ class HaRouter(router.RouterInfo):
         instance = self._get_keepalived_instance()
         return instance.get_existing_vip_ip_addresses(interface_name)
 
+    def get_router_cidrs(self, device):
+        return set(self._ha_get_existing_cidrs(device.name))
+
     def _ha_external_gateway_removed(self, interface_name):
         self._clear_vips(interface_name)
 
@@ -207,7 +210,6 @@ class HaRouter(router.RouterInfo):
         process = keepalived.KeepalivedManager.get_process(
             self.agent_conf,
             self.router_id,
-            self.root_helper,
             self.ns_name,
             self.agent_conf.ha_confs_path)
         if process.active:
@@ -223,9 +225,7 @@ class HaRouter(router.RouterInfo):
         a VIP to keepalived. This means that the IPv6 link local address
         will only be present on the master.
         """
-        device = ip_lib.IPDevice(interface_name,
-                                 self.root_helper,
-                                 self.ns_name)
+        device = ip_lib.IPDevice(interface_name, namespace=self.ns_name)
         ipv6_lladdr = self._get_ipv6_lladdr(device.link.address)
 
         if self._should_delete_ipv6_lladdr(ipv6_lladdr):
@@ -242,3 +242,13 @@ class HaRouter(router.RouterInfo):
         old_gateway_cidr = self.ex_gw_port['ip_cidr']
         self._remove_vip(old_gateway_cidr)
         self._ha_external_gateway_added(ex_gw_port, interface_name)
+
+    def add_floating_ip(self, fip, interface_name, device):
+        fip_ip = fip['floating_ip_address']
+        ip_cidr = common_utils.ip_to_cidr(fip_ip)
+        self._add_vip(ip_cidr, interface_name)
+        # TODO(Carl) Should this return status?
+        # return l3_constants.FLOATINGIP_STATUS_ACTIVE
+
+    def remove_floating_ip(self, device, ip_cidr):
+        self._remove_vip(ip_cidr)

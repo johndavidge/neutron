@@ -15,17 +15,26 @@
 from neutron.agent.l3 import dvr_fip_ns
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
+from neutron.common import constants as l3_constants
+from neutron.common import utils as common_utils
 
 
 class DvrRouter(router.RouterInfo):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, host, *args, **kwargs):
         super(DvrRouter, self).__init__(*args, **kwargs)
+
+        self.host = host
 
         self.floating_ips_dict = {}
         self.snat_iptables_manager = None
         # Linklocal subnet for router and floating IP namespace link
         self.rtr_fip_subnet = None
         self.dist_fip_count = None
+
+    def get_floating_ips(self):
+        """Filter Floating IPs to be hosted on this agent."""
+        floating_ips = super(DvrRouter, self).get_floating_ips()
+        return [i for i in floating_ips if i['host'] == self.host]
 
     def _handle_fip_nat_rules(self, interface_name, action):
         """Configures NAT rules for Floating IPs for DVR.
@@ -57,13 +66,12 @@ class DvrRouter(router.RouterInfo):
         rule_pr = self.fip_ns.allocate_rule_priority()
         self.floating_ips_dict[floating_ip] = rule_pr
         fip_2_rtr_name = self.fip_ns.get_int_device_name(self.router_id)
-        ip_rule = ip_lib.IpRule(self.root_helper, namespace=self.ns_name)
+        ip_rule = ip_lib.IpRule(namespace=self.ns_name)
         ip_rule.add(fixed_ip, dvr_fip_ns.FIP_RT_TBL, rule_pr)
         #Add routing rule in fip namespace
         fip_ns_name = self.fip_ns.get_name()
         rtr_2_fip, _ = self.rtr_fip_subnet.get_pair()
-        device = ip_lib.IPDevice(fip_2_rtr_name, self.root_helper,
-                                 namespace=fip_ns_name)
+        device = ip_lib.IPDevice(fip_2_rtr_name, namespace=fip_ns_name)
         device.route.add_route(fip_cidr, str(rtr_2_fip.ip))
         interface_name = (
             self.fip_ns.get_ext_device_name(
@@ -71,8 +79,7 @@ class DvrRouter(router.RouterInfo):
         ip_lib.send_garp_for_proxyarp(fip_ns_name,
                                       interface_name,
                                       floating_ip,
-                                      self.agent_conf.send_arp_for_ha,
-                                      self.root_helper)
+                                      self.agent_conf.send_arp_for_ha)
         # update internal structures
         self.dist_fip_count = self.dist_fip_count + 1
 
@@ -88,24 +95,20 @@ class DvrRouter(router.RouterInfo):
         fip_ns_name = self.fip_ns.get_name()
         if floating_ip in self.floating_ips_dict:
             rule_pr = self.floating_ips_dict[floating_ip]
-            ip_rule = ip_lib.IpRule(self.root_helper, namespace=self.ns_name)
+            ip_rule = ip_lib.IpRule(namespace=self.ns_name)
             ip_rule.delete(floating_ip, dvr_fip_ns.FIP_RT_TBL, rule_pr)
             self.fip_ns.deallocate_rule_priority(rule_pr)
             #TODO(rajeev): Handle else case - exception/log?
 
-        device = ip_lib.IPDevice(fip_2_rtr_name, self.root_helper,
-                                 namespace=fip_ns_name)
+        device = ip_lib.IPDevice(fip_2_rtr_name, namespace=fip_ns_name)
 
         device.route.delete_route(fip_cidr, str(rtr_2_fip.ip))
         # check if this is the last FIP for this router
         self.dist_fip_count = self.dist_fip_count - 1
         if self.dist_fip_count == 0:
             #remove default route entry
-            device = ip_lib.IPDevice(rtr_2_fip_name,
-                                     self.root_helper,
-                                     namespace=self.ns_name)
-            ns_ip = ip_lib.IPWrapper(self.root_helper,
-                                     namespace=fip_ns_name)
+            device = ip_lib.IPDevice(rtr_2_fip_name, namespace=self.ns_name)
+            ns_ip = ip_lib.IPWrapper(namespace=fip_ns_name)
             device.route.delete_gateway(str(fip_2_rtr.ip),
                                         table=dvr_fip_ns.FIP_RT_TBL)
             self.fip_ns.local_subnets.release(self.router_id)
@@ -120,3 +123,17 @@ class DvrRouter(router.RouterInfo):
                 # semaphore to sync creation/deletion of this namespace.
                 self.fip_ns.destroy()
                 self.fip_ns = None
+
+    def add_floating_ip(self, fip, interface_name, device):
+        if not self._add_fip_addr_to_device(fip, device):
+            return l3_constants.FLOATINGIP_STATUS_ERROR
+
+        # Special Handling for DVR - update FIP namespace
+        # and ri.namespace to handle DVR based FIP
+        ip_cidr = common_utils.ip_to_cidr(fip['floating_ip_address'])
+        self.floating_ip_added_dist(fip, ip_cidr)
+        return l3_constants.FLOATINGIP_STATUS_ACTIVE
+
+    def remove_floating_ip(self, device, ip_cidr):
+        super(DvrRouter, self).remove_floating_ip(device, ip_cidr)
+        self.floating_ip_removed_dist(ip_cidr)

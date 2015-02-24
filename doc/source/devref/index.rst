@@ -30,6 +30,7 @@ Programming HowTos and Tutorials
     :maxdepth: 3
 
     development.environment
+    contribute
 
 
 Neutron Internals
@@ -45,6 +46,7 @@ Neutron Internals
    layer3
    l2_agents
    advanced_services
+   oslo-incubator
 
 
 Module Reference

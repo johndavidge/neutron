@@ -28,6 +28,7 @@ from oslo_config import cfg
 import oslo_messaging
 from six import moves
 
+from neutron.agent.common import config
 from neutron.agent import l2population_rpc
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ovs_lib
@@ -293,6 +294,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         consumers = [[topics.PORT, topics.UPDATE],
                      [topics.NETWORK, topics.DELETE],
                      [constants.TUNNEL, topics.UPDATE],
+                     [constants.TUNNEL, topics.DELETE],
                      [topics.SECURITY_GROUP, topics.UPDATE],
                      [topics.DVR, topics.UPDATE]]
         if self.l2_pop:
@@ -350,6 +352,25 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         if not self.l2_pop:
             self._setup_tunnel_port(self.tun_br, tun_name, tunnel_ip,
                                     tunnel_type)
+
+    def tunnel_delete(self, context, **kwargs):
+        LOG.debug("tunnel_delete received")
+        if not self.enable_tunneling:
+            return
+        tunnel_ip = kwargs.get('tunnel_ip')
+        if not tunnel_ip:
+            LOG.error(_LE("No tunnel_ip specified, cannot delete tunnels"))
+            return
+        tunnel_type = kwargs.get('tunnel_type')
+        if not tunnel_type:
+            LOG.error(_LE("No tunnel_type specified, cannot delete tunnels"))
+            return
+        if tunnel_type not in self.tunnel_types:
+            LOG.error(_LE("tunnel_type %s not supported by agent"),
+                      tunnel_type)
+            return
+        ofport = self.tun_br_ofports[tunnel_type].get(tunnel_ip)
+        self.cleanup_tunnel_port(self.tun_br, ofport, tunnel_type)
 
     def fdb_add(self, context, fdb_entries):
         LOG.debug("fdb_add received")
@@ -1305,8 +1326,7 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
         try:
             return '%08x' % netaddr.IPAddress(ip_address, version=4)
         except Exception:
-            LOG.warn(_LW("Unable to create tunnel port. "
-                         "Invalid remote IP: %s"), ip_address)
+            LOG.warn(_LW("Invalid remote IP: %s"), ip_address)
             return
 
     def tunnel_sync(self):
@@ -1314,7 +1334,8 @@ class OVSNeutronAgent(sg_rpc.SecurityGroupAgentRpcCallbackMixin,
             for tunnel_type in self.tunnel_types:
                 details = self.plugin_rpc.tunnel_sync(self.context,
                                                       self.local_ip,
-                                                      tunnel_type)
+                                                      tunnel_type,
+                                                      cfg.CONF.host)
                 if not self.l2_pop:
                     tunnels = details['tunnels']
                     for tunnel in tunnels:
@@ -1570,6 +1591,7 @@ def create_agent_config_map(config):
 
 def main():
     cfg.CONF.register_opts(ip_lib.OPTS)
+    config.register_root_helper(cfg.CONF)
     common_config.init(sys.argv[1:])
     common_config.setup_logging()
     q_utils.log_opt_values(LOG)

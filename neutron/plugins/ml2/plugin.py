@@ -359,7 +359,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                 return (None, None)
             oport = self._make_port_dict(port_db)
             port = self._make_port_dict(port_db)
-            network = self.get_network(plugin_context, port['network_id'])
+            network = new_context.network.current
             if port['device_owner'] == const.DEVICE_OWNER_DVR_INTERFACE:
                 # REVISIT(rkukura): The PortBinding instance from the
                 # ml2_port_bindings table, returned as cur_binding
@@ -593,7 +593,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
             net_data['id'] = result['id']
             self.type_manager.create_network_segments(context, net_data,
                                                       tenant_id)
-            self.type_manager._extend_network_dict_provider(context, result)
+            self.type_manager.extend_network_dict_provider(context, result)
             mech_context = driver_context.NetworkContext(self, context,
                                                          result)
             self.mechanism_manager.create_network_precommit(mech_context)
@@ -628,8 +628,8 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                                                           original_network)
             self._process_l3_update(context, updated_network,
                                     network['network'])
-            self.type_manager._extend_network_dict_provider(context,
-                                                            updated_network)
+            self.type_manager.extend_network_dict_provider(context,
+                                                           updated_network)
             mech_context = driver_context.NetworkContext(
                 self, context, updated_network,
                 original_network=original_network)
@@ -646,7 +646,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
         session = context.session
         with session.begin(subtransactions=True):
             result = super(Ml2Plugin, self).get_network(context, id, None)
-            self.type_manager._extend_network_dict_provider(context, result)
+            self.type_manager.extend_network_dict_provider(context, result)
 
         return self._fields(result, fields)
 
@@ -658,7 +658,7 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
                          self).get_networks(context, filters, None, sorts,
                                             limit, marker, page_reverse)
             for net in nets:
-                self.type_manager._extend_network_dict_provider(context, net)
+                self.type_manager.extend_network_dict_provider(context, net)
 
             nets = self._filter_nets_provider(context, nets, filters)
             nets = self._filter_nets_l3(context, nets, filters)
@@ -961,13 +961,12 @@ class Ml2Plugin(db_base_plugin_v2.NeutronDbPluginV2,
     def create_port_bulk(self, context, ports):
         objects = self._create_bulk_ml2(attributes.PORT, context, ports)
 
-        for obj in objects:
-            # REVISIT(rkukura): Is there any point in calling this before
-            # a binding has been successfully established?
-            # TODO(banix): Use a single notification for all objects
-            self.notify_security_groups_member_updated(context,
-                                                       obj['result'])
+        # REVISIT(rkukura): Is there any point in calling this before
+        # a binding has been successfully established?
+        results = [obj['result'] for obj in objects]
+        self.notify_security_groups_member_updated_bulk(context, results)
 
+        for obj in objects:
             attrs = obj['attributes']
             if attrs and attrs.get(portbindings.HOST_ID):
                 new_host_port = self._get_host_port_if_changed(

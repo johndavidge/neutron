@@ -91,7 +91,6 @@ class TestOFANeutronAgentBridge(ofa_test_base.OFAAgentTestBase):
     def setUp(self):
         super(TestOFANeutronAgentBridge, self).setUp()
         self.br_name = 'bridge1'
-        self.root_helper = 'fake_helper'
         self.ovs = self.mod_agent.Bridge(
             self.br_name, self.ryuapp)
 
@@ -761,6 +760,7 @@ class TestOFANeutronAgent(ofa_test_base.OFAAgentTestBase):
         self.agent.local_ip = 'agent_ip'
         self.agent.context = 'fake_context'
         self.agent.tunnel_types = ['vxlan']
+        self.agent.host = cfg.CONF.host
         with mock.patch.object(
             self.agent.plugin_rpc, 'tunnel_sync'
         ) as tunnel_sync_rpc_fn:
@@ -768,7 +768,8 @@ class TestOFANeutronAgent(ofa_test_base.OFAAgentTestBase):
             tunnel_sync_rpc_fn.assert_called_once_with(
                 self.agent.context,
                 self.agent.local_ip,
-                self.agent.tunnel_types[0])
+                self.agent.tunnel_types[0],
+                self.agent.host)
 
     def test__get_ports(self):
         ofpp = importutils.import_module('ryu.ofproto.ofproto_v1_3_parser')

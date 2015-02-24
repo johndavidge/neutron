@@ -217,13 +217,97 @@ class TestMl2PortsV2(test_plugin.TestPortsV2, Ml2PluginV2TestCase):
                 self._validate_behavior_on_bulk_failure(
                     res, 'ports', webob.exc.HTTPServerError.code)
 
+    def test_create_ports_bulk_with_sec_grp(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        with contextlib.nested(
+            self.network(),
+            mock.patch.object(plugin.notifier,
+                              'security_groups_member_updated'),
+            mock.patch.object(plugin.notifier,
+                              'security_groups_provider_updated')
+        ) as (net, m_upd, p_upd):
+
+            res = self._create_port_bulk(self.fmt, 3, net['network']['id'],
+                                         'test', True, context=ctx)
+            ports = self.deserialize(self.fmt, res)
+            used_sg = ports['ports'][0]['security_groups']
+            m_upd.assert_called_once_with(ctx, used_sg)
+            self.assertFalse(p_upd.called)
+
+    def test_create_ports_bulk_with_sec_grp_member_provider_update(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        with contextlib.nested(
+            self.network(),
+            mock.patch.object(plugin.notifier,
+                              'security_groups_member_updated'),
+            mock.patch.object(plugin.notifier,
+                              'security_groups_provider_updated')
+        ) as (net, m_upd, p_upd):
+
+            net_id = net['network']['id']
+            data = [{
+                    'network_id': net_id,
+                    'tenant_id': self._tenant_id
+                    },
+                    {
+                    'network_id': net_id,
+                    'tenant_id': self._tenant_id,
+                    'device_owner': constants.DEVICE_OWNER_DHCP
+                    }
+                    ]
+
+            res = self._create_bulk_from_list(self.fmt, 'port',
+                                              data, context=ctx)
+            ports = self.deserialize(self.fmt, res)
+            used_sg = ports['ports'][0]['security_groups']
+            m_upd.assert_called_once_with(ctx, used_sg)
+            p_upd.assert_called_once_with(ctx)
+
+            m_upd.reset_mock()
+            p_upd.reset_mock()
+            data[0]['device_owner'] = constants.DEVICE_OWNER_DHCP
+            self._create_bulk_from_list(self.fmt, 'port',
+                                        data, context=ctx)
+            self.assertFalse(m_upd.called)
+            p_upd.assert_called_once_with(ctx)
+
+    def test_create_ports_bulk_with_sec_grp_provider_update_ipv6(self):
+        ctx = context.get_admin_context()
+        plugin = manager.NeutronManager.get_plugin()
+        fake_prefix = '2001:db8::/64'
+        fake_gateway = 'fe80::1'
+        with self.network() as net:
+            with contextlib.nested(
+                self.subnet(net, gateway_ip=fake_gateway,
+                            cidr=fake_prefix, ip_version=6),
+                mock.patch.object(
+                    plugin.notifier, 'security_groups_member_updated'),
+                mock.patch.object(
+                    plugin.notifier, 'security_groups_provider_updated')
+            ) as (snet_v6, m_upd, p_upd):
+
+                net_id = net['network']['id']
+                data = [{
+                        'network_id': net_id,
+                        'tenant_id': self._tenant_id,
+                        'fixed_ips': [{'subnet_id': snet_v6['subnet']['id']}],
+                        'device_owner': constants.DEVICE_OWNER_ROUTER_INTF
+                        }
+                        ]
+                self._create_bulk_from_list(self.fmt, 'port',
+                                            data, context=ctx)
+                self.assertFalse(m_upd.called)
+                p_upd.assert_called_once_with(ctx)
+
     def test_delete_port_no_notify_in_disassociate_floatingips(self):
         ctx = context.get_admin_context()
         plugin = manager.NeutronManager.get_plugin()
         l3plugin = manager.NeutronManager.get_service_plugins().get(
             service_constants.L3_ROUTER_NAT)
         with contextlib.nested(
-            self.port(do_delete=False),
+            self.port(),
             mock.patch.object(l3plugin, 'disassociate_floatingips'),
             mock.patch.object(l3plugin, 'notify_routers_updated')
         ) as (port, disassociate_floatingips, notify):
@@ -291,8 +375,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
             mock.patch.object(manager.NeutronManager,
                               'get_service_plugins',
                               return_value=self.service_plugins),
-            self.port(do_delete=False,
-                      device_owner=device_owner),
+            self.port(device_owner=device_owner),
             mock.patch.object(self.l3plugin, 'notify_routers_updated'),
             mock.patch.object(self.l3plugin, 'disassociate_floatingips',
                               return_value=fip_set),
@@ -329,8 +412,7 @@ class TestMl2DvrPortsV2(TestMl2PortsV2):
             mock.patch.object(manager.NeutronManager,
                               'get_service_plugins',
                               return_value=self.service_plugins),
-            self.port(do_delete=False,
-                      device_owner='compute:None'),
+            self.port(device_owner='compute:None'),
             mock.patch.object(self.l3plugin, 'dvr_deletens_if_no_port',
                               return_value=[ns_to_delete]),
             mock.patch.object(self.l3plugin, 'remove_router_from_l3_agent',
@@ -862,8 +944,8 @@ class TestMultiSegmentNetworks(Ml2PluginV2TestCase):
 
     def test_extend_dictionary_no_segments(self):
         network = dict(name='net_no_segment', id='5', tenant_id='tenant_one')
-        self.driver.type_manager._extend_network_dict_provider(self.context,
-                                                               network)
+        self.driver.type_manager.extend_network_dict_provider(self.context,
+                                                              network)
         self.assertIsNone(network[pnet.NETWORK_TYPE])
         self.assertIsNone(network[pnet.PHYSICAL_NETWORK])
         self.assertIsNone(network[pnet.SEGMENTATION_ID])

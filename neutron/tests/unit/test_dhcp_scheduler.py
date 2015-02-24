@@ -243,7 +243,7 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
                                              dhcp_agent={'id': 'id2'}),
             sched_db.NetworkDhcpAgentBinding(network_id='foo4',
                                              dhcp_agent={'id': 'id2'})]
-        with mock.patch.object(self, '_agent_starting_up',
+        with mock.patch.object(self, 'agent_starting_up',
                                side_effect=[True, False]):
             res = [b for b in self._filter_bindings(None, bindings)]
             # once per each agent id1 and id2
@@ -251,3 +251,15 @@ class TestNetworksFailover(TestDhcpSchedulerBaseTestCase,
             res_ids = [b.network_id for b in res]
             self.assertIn('foo3', res_ids)
             self.assertIn('foo4', res_ids)
+
+    def test_remove_networks_from_down_agents_catches_all(self):
+        with contextlib.nested(
+            mock.patch.object(
+                self, 'remove_network_from_dhcp_agent',
+                side_effect=Exception("Unexpected exception!")),
+            mock.patch.object(
+                self, '_filter_bindings',
+                return_value=[sched_db.NetworkDhcpAgentBinding(
+                                  network_id='foo', dhcp_agent_id='bar')])
+        ):
+            self.remove_networks_from_down_agents()
