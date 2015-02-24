@@ -13,6 +13,9 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import eventlet
+import signal
+
 from neutron.agent.linux import dibbler
 from neutron.common import constants as l3_constants
 from neutron.common import ipv6_utils
@@ -24,12 +27,13 @@ LOG = logging.getLogger(__name__)
 
 
 class PrefixDelegation(object):
-    def __init__(self, context, pmon, intf_driver, notifier):
+    def __init__(self, context, pmon, intf_driver, notifier, pd_update_cb):
         self.context = context
         self.pmon = pmon
         self.intf_driver = intf_driver
         self.notifier = notifier
         self.routers = {}
+        self.pd_update_cb = pd_update_cb
 
     def enable_subnet(self, router_id, subnet_id, ri_ifname, mac):
         pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
@@ -90,12 +94,25 @@ class PrefixDelegation(object):
             self.intf_driver.add_v6addr(router['gw_interface'],
                                         '%s/64' % lla,
                                         router['ns_name'])
+            eventlet.spawn_n(self._ensure_lla_task, router, '%s/64' % lla)
             return lla
 
     def _delete_lla_address(self, router, lla):
         if lla:
             self.intf_driver.delete_lla(router['gw_interface'],
                                         lla, router['ns_name'])
+
+
+    def _ensure_lla_task(self, router, pd_lla):
+        while True:
+            llas = self.intf_driver.get_llas(router['gw_interface'],
+                                             router['ns_name'])
+            if self._ensure_lla(pd_lla, llas):
+                self.pd_update_cb()
+                break
+            else:
+                eventlet.sleep(2)
+        LOG.debug("LLA %s is active now" % pd_lla)
 
     @staticmethod
     def _ensure_lla(pd_lla, llas):
@@ -111,8 +128,8 @@ class PrefixDelegation(object):
         for router_id, router in self.routers.iteritems():
             if not router['gw_interface']:
                 continue
-            llas = self.intf_driver.get_llas(router['gw_interface'],
-                                             router['ns_name'])
+
+            llas = None
 
             for subnet_id, pdo in router['subnets'].iteritems():
                 if pdo['client_started']:
@@ -121,6 +138,10 @@ class PrefixDelegation(object):
                         pdo['prefix'] = prefix
                         prefix_update[subnet_id] = prefix
                 else:
+                    if not llas:
+                        llas = self.intf_driver.get_llas(router['gw_interface'],
+                                                         router['ns_name'])
+
                     if self._ensure_lla('%s/64' % pdo['bind_lla'], llas):
                         dibbler.enable_ipv6_pd(self.pmon,
                                                router_id,
@@ -133,3 +154,11 @@ class PrefixDelegation(object):
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
             self.notifier.send_prefix_update(context, prefix_update)
+
+    def after_start(self):
+        LOG.debug('SIGHUP signal handler set')
+        signal.signal(signal.SIGHUP, self._handle_sighup)
+
+    def _handle_sighup(self, signum, frame):
+        LOG.debug('SIGHUP called')
+        self.pd_update_cb()

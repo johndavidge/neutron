@@ -220,7 +220,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             self.event_observers.add(driver)
 
         self.pd = pd.PrefixDelegation(self.context, self.process_monitor,
-                                      self.driver, self.plugin_rpc)
+                                      self.driver, self.plugin_rpc,
+                                      self.create_pd_router_update)
 
     def _check_config_params(self):
         """Check items in configuration files.
@@ -1157,6 +1158,10 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
     def _process_router_update(self):
         for rp, update in self._queue.each_update_to_next_router():
             LOG.debug("Starting router update for %s", update.id)
+            if update.action == queue.PD_UPDATE:
+                self.pd.run_pd_client(self.context)
+                continue
+
             router = update.router
             if update.action != queue.DELETE_ROUTER and not router:
                 try:
@@ -1193,10 +1198,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         pool = eventlet.GreenPool(size=8)
         while True:
             pool.spawn_n(self._process_router_update)
-
-    @periodic_task.periodic_task(spacing=20)
-    def run_pd(self, context):
-        self.pd.run_pd_client(context)
 
     @periodic_task.periodic_task
     def periodic_sync_routers_task(self, context):
@@ -1262,6 +1263,14 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         LOG.info(_LI("L3 agent started"))
         # When L3 agent is ready, we immediately do a full sync
         self.periodic_sync_routers_task(self.context)
+        self.pd.after_start()
+
+    def create_pd_router_update(self):
+        update = queue.RouterUpdate(None,
+                                    queue.PRIORITY_PD_UPDATE,
+                                    timestamp=timeutils.utcnow(),
+                                    action=queue.PD_UPDATE)
+        self._queue.add(update)
 
 
 class L3NATAgentWithStateReport(L3NATAgent):
