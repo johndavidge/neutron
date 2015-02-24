@@ -42,29 +42,34 @@ class PrefixDelegation(object):
                'bind_lla': None,
                'port_assigned': False,
                'client_started': False}
-        router = self.routers[router_id]
-        pdo['bind_lla'] = self._add_lla_address(router, mac)
-        router['subnets'][subnet_id] = pdo
+        router = self.routers.get(router_id)
+        if router is not None:
+            pdo['bind_lla'] = self._add_lla_address(router, mac)
+            router['subnets'][subnet_id] = pdo
 
     def disable_subnet(self, router_id, subnet_id):
-        router = self.routers[router_id]
-        pdo = router['subnets'].get(subnet_id)
-        self._delete_lla_address(router, '%s/64' % pdo['bind_lla'])
-        if pdo and pdo['client_started']:
-            dibbler.disable_ipv6_pd(self.pmon, router_id,
-                                    router['ns_name'], subnet_id)
-        del router['subnets'][subnet_id]
+        router = self.routers.get(router_id)
+        if router is not None:
+            pdo = router['subnets'].get(subnet_id)
+            self._delete_lla_address(router, '%s/64' % pdo['bind_lla'])
+            if pdo and pdo['client_started']:
+                dibbler.disable_ipv6_pd(self.pmon, router_id,
+                                        router['ns_name'], subnet_id)
+            del router['subnets'][subnet_id]
 
     def update_subnet(self, router_id, subnet_id):
-        router = self.routers[router_id]
-        pdo = router['subnets'].get(subnet_id)
-        if pdo and not pdo['port_assigned']:
-            pdo['port_assigned'] = True
-            return True
+        router = self.routers.get(router_id)
+        if router is not None:
+            pdo = router['subnets'].get(subnet_id)
+            if pdo and not pdo['port_assigned']:
+                pdo['port_assigned'] = True
+                return True
         return False
 
     def add_gw_interface(self, router_id, gw_ifname):
-        self.routers[router_id]['gw_interface'] = gw_ifname
+        router = self.routers.get(router_id)
+        if router is not None:
+            router['gw_interface'] = gw_ifname
 
     def remove_gw_interface(self, router_id):
         pass
