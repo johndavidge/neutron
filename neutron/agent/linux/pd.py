@@ -13,157 +13,123 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-import jinja2
-import os
-from oslo_config import cfg
-import shutil
-import six
-
-from neutron.agent.linux import external_process
-from neutron.agent.linux import utils
-from neutron.common import constants
+from neutron.agent.linux import dibbler
+from neutron.common import constants as l3_constants
+from neutron.common import ipv6_utils
 from neutron.openstack.common import log as logging
+from neutron.openstack.common import periodic_task
 
 
 LOG = logging.getLogger(__name__)
 
-OPTS = [
-    cfg.StrOpt('pd_confs',
-               default='$state_path/pd',
-               help=_('Location to store IPv6 PD config files')),
-]
 
-cfg.CONF.register_opts(OPTS)
+class PrefixDelegation(object):
+    def __init__(self, context, pmon, intf_driver, notifier):
+        self.context = context
+        self.pmon = pmon
+        self.intf_driver = intf_driver
+        self.notifier = notifier
+        self.routers = {}
 
-CONFIG_TEMPLATE = jinja2.Template("""
-# Config for dibbler-client.
+    def enable_subnet(self, router_id, subnet_id, ri_ifname, mac):
+        pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
+               'ri_ifname': ri_ifname,
+               'mac': mac,
+               'bind_lla': None,
+               'port_assigned': False,
+               'client_started': False}
+        router = self.routers[router_id]
+        pdo['bind_lla'] = self._add_lla_address(router, mac)
+        router['subnets'][subnet_id] = pdo
 
-# Use enterprise number based duid
-duid-type duid-en {{ enterprise_number }} {{ va_id }}
+    def disable_subnet(self, router_id, subnet_id):
+        router = self.routers[router_id]
+        pdo = router['subnets'].get(subnet_id)
+        self._delete_lla_address(router, '%s/64' % pdo['bind_lla'])
+        if pdo and pdo['client_started']:
+            dibbler.disable_ipv6_pd(self.pmon, router_id,
+                                    router['ns_name'], subnet_id)
+        del router['subnets'][subnet_id]
 
-# 8 (Debug) is most verbose. 7 (Info) is usually the best option
-log-level 8
+    def update_subnet(self, router_id, subnet_id):
+        router = self.routers[router_id]
+        pdo = router['subnets'].get(subnet_id)
+        if pdo and not pdo['port_assigned']:
+            pdo['port_assigned'] = True
+            return True
+        return False
 
-# No automatic downlink address assignment
-downlink-prefix-ifaces "none"
+    def add_gw_interface(self, router_id, gw_ifname):
+        self.routers[router_id]['gw_interface'] = gw_ifname
 
-# Use script to notify l3_agent of assigned prefix
-script {{ script_path }}
+    def remove_gw_interface(self, router_id):
+        pass
 
-# Ask for prefix over the external gateway interface
-iface {{ interface_name }} {
-# ask for address
-    pd 1
-}
-""")
+    def add_router(self, router_id, name_space):
+        if not self.routers.get(router_id):
+            self.routers[router_id] = {'gw_interface': None,
+                                       'ns_name': name_space,
+                                       'subnets': {}}
+    def remove_router(self, router_id):
+        pass
 
-# The first line must be #!/bin/bash
-SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
+    @staticmethod
+    def _get_lla(mac):
+        new_mac = mac.split(':')
+        byte0 = int(new_mac[0], 16)
+        if byte0 > 0x80:
+            new_mac[0] = "%02x" % (byte0 - 1)
+        else:
+            new_mac[0] = "%02x" % (byte0 + 1)
+        lla = ipv6_utils.get_ipv6_addr_by_EUI64("fe80::/64", ':'.join(new_mac))
+        return lla
 
-neutron-pd-notify $1 {{ prefix_path }} {{ l3_agent_pid }}
-""")
+    def _add_lla_address(self, router, mac):
+        if router['gw_interface']:
+            lla = self._get_lla(mac)
+            self.intf_driver.add_v6addr(router['gw_interface'],
+                                        '%s/64' % lla,
+                                        router['ns_name'])
+            return lla
 
+    def _delete_lla_address(self, router, lla):
+        if lla:
+            self.intf_driver.delete_lla(router['gw_interface'],
+                                        lla, router['ns_name'])
 
-def _get_dibbler_client_working_area(subnet_id):
-    return "%s/%s" % (cfg.CONF.pd_confs, subnet_id)
+    @staticmethod
+    def _ensure_lla(pd_lla, llas):
+        for lla in llas:
+            if pd_lla == lla[0] and 'tentative' not in lla:
+                return True
+        return False
 
+    def run_pd_client(self, context):
+        LOG.debug("Starting run_pd_client")
 
-def _convert_subnet_id(subnet_id):
-    return ''.join(subnet_id.split('-'))
+        prefix_update = {}
+        for router_id, router in self.routers.iteritems():
+            if not router['gw_interface']:
+                continue
+            llas = self.intf_driver.get_llas(router['gw_interface'],
+                                             router['ns_name'])
 
+            for subnet_id, pdo in router['subnets'].iteritems():
+                if pdo['client_started']:
+                    prefix = dibbler.get_prefix(subnet_id)
+                    if prefix != pdo['prefix']:
+                        pdo['prefix'] = prefix
+                        prefix_update[subnet_id] = prefix
+                else:
+                    if self._ensure_lla('%s/64' % pdo['bind_lla'], llas):
+                        dibbler.enable_ipv6_pd(self.pmon,
+                                               router_id,
+                                               router['ns_name'],
+                                               subnet_id,
+                                               router['gw_interface'],
+                                               pdo['bind_lla'])
+                        pdo['client_started'] = True
 
-def _get_prefix_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
-    return "%s/prefix" % dcwa
-
-
-def _get_pid_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
-    return "%s/client.pid" % dcwa
-
-
-def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
-    script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
-    buf = six.StringIO()
-    buf.write('%s' % SCRIPT_TEMPLATE.render(
-                         prefix_path=_get_prefix_path(subnet_id),
-                         l3_agent_pid=os.getpid()))
-    utils.replace_file(script_path, buf.getvalue())
-    os.chmod(script_path, 0o744)
-
-    dibbler_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
-    buf = six.StringIO()
-    buf.write('%s' % CONFIG_TEMPLATE.render(
-                         enterprise_number=8888,
-                         va_id='0x%s' % _convert_subnet_id(subnet_id),
-                         script_path='"%s/notify.sh"' % dcwa,
-                         interface_name='"%s"' % ex_gw_ifname))
-
-    utils.replace_file(dibbler_conf, buf.getvalue())
-    return dcwa
-
-
-def _spawn_dibbler(router_id, subnet_id, lla,
-                   dibbler_conf, router_ns):
-    def callback(pid_file):
-        dibbler_cmd = ['dibbler-client',
-                       'start',
-                       '-W', '%s' % dibbler_conf,
-                       '-A', '%s' % lla]
-        return dibbler_cmd
-
-    pid_file = _get_pid_path(subnet_id)
-    dibbler = external_process.ProcessManager(
-                                   cfg.CONF,
-                                   subnet_id,
-                                   router_ns,
-                                   'dibbler',
-                                   pid_file=pid_file)
-
-    dibbler.enable(callback, True)
-    LOG.debug("dibbler client enabled for router %s subnet %s",
-              router_id, subnet_id)
-
-
-def _is_dibbler_client_running(subnet_id):
-    return utils.get_value_from_file(_get_pid_path(subnet_id))
-
-
-def enable_ipv6_pd(router_id, router_ns, subnet_id,
-                   ex_gw_ifname, lla):
-    LOG.debug("Enable IPv6 PD for router %s subnet %s", router_id, subnet_id)
-    if not _is_dibbler_client_running(subnet_id):
-        dibbler_conf = _generate_dibbler_conf(router_id,
-                                              subnet_id, ex_gw_ifname)
-        _spawn_dibbler(router_id, subnet_id, lla,
-                       dibbler_conf, router_ns)
-
-
-def disable_ipv6_pd(router_id, router_ns, subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
-    dibbler = external_process.ProcessManager(
-                                   cfg.CONF,
-                                   subnet_id,
-                                   router_ns,
-                                   'dibbler',
-                                   pid_file=_get_pid_path(subnet_id))
-
-    def callback(pid_file):
-        dibbler_cmd = ['dibbler-client',
-                       'stop',
-                       '-W', '%s' % dcwa]
-        return dibbler_cmd
-
-    dibbler.disable(cmd_callback=callback)
-    shutil.rmtree(dcwa, ignore_errors=True)
-    LOG.debug("dibbler client disabled for router %s subnet %s",
-              router_id, subnet_id)
-
-
-def get_prefix(subnet_id):
-    prefix_fname = _get_prefix_path(subnet_id)
-    prefix = utils.get_value_from_file(prefix_fname)
-    if not prefix:
-        prefix = constants.TEMP_PD_PREFIX
-    return prefix
+        if prefix_update:
+            LOG.debug("Update server with prefixes: %s", prefix_update)
+            self.notifier.send_prefix_update(context, prefix_update)

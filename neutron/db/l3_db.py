@@ -1096,7 +1096,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
         network_ids = set(p['network_id'] for p, _ in each_port_with_ip())
         filters = {'network_id': [id for id in network_ids]}
         fields = ['id', 'cidr', 'gateway_ip',
-                  'network_id', 'ipv6_ra_mode']
+                  'network_id', 'ipv6_ra_mode', 'pd_enabled']
 
         subnets_by_network = dict((id, []) for id in network_ids)
         for subnet in self._core_plugin.get_subnets(context, filters, fields):
@@ -1108,7 +1108,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                 subnet_info = {'id': subnet['id'],
                                'cidr': subnet['cidr'],
                                'gateway_ip': subnet['gateway_ip'],
-                               'ipv6_ra_mode': subnet['ipv6_ra_mode']}
+                               'ipv6_ra_mode': subnet['ipv6_ra_mode'],
+                               'pd_enabled': subnet['pd_enabled']}
 
                 if subnet['id'] == fixed_ip['subnet_id']:
                     port['subnet'] = subnet_info
