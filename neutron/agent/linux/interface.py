@@ -128,28 +128,24 @@ class LinuxInterfaceDriver(object):
 
     def add_v6addr(self, device_name, v6addr, namespace):
         device = ip_lib.IPDevice(device_name,
-                                 self.root_helper,
                                  namespace=namespace)
         net = netaddr.IPNetwork(v6addr)
         device.addr.add(6, str(net), str(net.broadcast))
 
     def delete_lla(self, device_name, lla, namespace):
         device = ip_lib.IPDevice(device_name,
-                                 self.root_helper,
                                  namespace=namespace)
         device.addr.delete(6, lla)
-        self.delete_conntrack_state(root_helper=self.root_helper,
-                                    namespace=namespace,
+        self.delete_conntrack_state(namespace=namespace,
                                     ip=lla)
 
     def get_llas(self, device_name, namespace):
         device = ip_lib.IPDevice(device_name,
-                                 self.root_helper,
                                  namespace=namespace)
 
         return device.addr.get_llas()
 
-    def delete_conntrack_state(self, root_helper, namespace, ip):
+    def delete_conntrack_state(self, namespace, ip):
         """Delete conntrack state associated with an IP address.
 
         This terminates any active connections through an IP.  Call this soon
