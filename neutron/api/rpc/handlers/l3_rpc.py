@@ -192,11 +192,6 @@ class L3RpcCallback(object):
         filters = {'fixed_ips': {'subnet_id': [subnet_id]}}
         return self.plugin.get_ports(context, filters=filters)
 
-    def get_subnet(self, context, **kwargs):
-        """PD: RPC called by l3-agent to check for pd_enabled"""
-        subnet_id = kwargs.get('subnet_id')
-        return self.plugin.get_subnet(context, subnet_id)
-
     def get_agent_gateway_port(self, context, **kwargs):
         """Get Agent Gateway port for FIP.
 

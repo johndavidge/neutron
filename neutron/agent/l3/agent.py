@@ -108,12 +108,6 @@ class L3PluginApi(object):
         return cctxt.call(context, 'get_ports_by_subnet', host=self.host,
                           subnet_id=subnet_id)
 
-    def get_subnet(self, context, subnet_id):
-        """Retrieve subnet by id."""
-        cctxt = self.client.prepare(version='1.2')
-        return cctxt.call(context, 'get_subnet', host=self.host,
-                          subnet_id=subnet_id)
-
     def get_agent_gateway_port(self, context, fip_net):
         """Get or create an agent_gateway_port."""
         cctxt = self.client.prepare(version='1.2')
@@ -463,12 +457,10 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         new_ipv6_port = False
         old_ipv6_port = False
         for p in new_ports:
-            for fip in p['fixed_ips']:
-                s = self.plugin_rpc.get_subnet(self.context, fip['subnet_id'])
-                if s['pd_enabled']:
-                    interface_name = self.get_internal_device_name(p['id'])
-                    self.pd.enable_subnet(ri.router['id'], fip['subnet_id'],
-                                          interface_name, p['mac_address'])
+            if p['subnet']['pd_enabled']:
+                interface_name = self.get_internal_device_name(p['id'])
+                self.pd.enable_subnet(ri.router['id'], p['subnet']['id'],
+                                      interface_name, p['mac_address'])
             self._set_subnet_info(p)
             self.internal_network_added(ri, p)
             ri.internal_ports.append(p)
@@ -478,10 +470,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 new_ipv6_port = True
 
         for p in old_ports:
-            for fip in p['fixed_ips']:
-                s = self.plugin_rpc.get_subnet(self.context, fip['subnet_id'])
-                if s['pd_enabled']:
-                    self.pd.disable_subnet(ri.router['id'], fip['subnet_id'])
+            if p['subnet']['pd_enabled']:
+                self.pd.disable_subnet(ri.router['id'], p['subnet']['id'])
             self.internal_network_removed(ri, p)
             ri.internal_ports.remove(p)
             if (not old_ipv6_port and
@@ -489,13 +479,11 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 old_ipv6_port = True
 
         for p in update_ports:
-            for fip in p['fixed_ips']:
-                s = self.plugin_rpc.get_subnet(self.context, fip['subnet_id'])
-                if s['pd_enabled']:
-                    self.pd.update_subnet(ri.router['id'], fip['subnet_id'])
-            #self._set_subnet_info(p)
-            #self._internal_network_updated(ri, p)
-            #new_ipv6_port = True
+            if (p['subnet']['pd_enabled'] and
+                self.pd.update_subnet(ri.router['id'], p['subnet']['id'])):
+                self._set_subnet_info(p)
+                self._internal_network_updated(ri, p)
+                new_ipv6_port = True
 
         # Enable RA
         if new_ipv6_port or old_ipv6_port:
