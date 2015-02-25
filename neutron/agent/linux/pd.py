@@ -20,7 +20,6 @@ from neutron.agent.linux import dibbler
 from neutron.common import constants as l3_constants
 from neutron.common import ipv6_utils
 from neutron.openstack.common import log as logging
-from neutron.openstack.common import periodic_task
 
 
 LOG = logging.getLogger(__name__)
@@ -79,6 +78,7 @@ class PrefixDelegation(object):
             self.routers[router_id] = {'gw_interface': None,
                                        'ns_name': name_space,
                                        'subnets': {}}
+
     def remove_router(self, router_id):
         pass
 
@@ -107,7 +107,6 @@ class PrefixDelegation(object):
             self.intf_driver.delete_lla(router['gw_interface'],
                                         lla, router['ns_name'])
 
-
     def _ensure_lla_task(self, router, pd_lla):
         while True:
             llas = self.intf_driver.get_llas(router['gw_interface'],
@@ -134,7 +133,7 @@ class PrefixDelegation(object):
             if not router['gw_interface']:
                 continue
 
-            llas = None
+            lla = None
 
             for subnet_id, pdo in router['subnets'].iteritems():
                 if pdo['client_started']:
@@ -143,11 +142,11 @@ class PrefixDelegation(object):
                         pdo['prefix'] = prefix
                         prefix_update[subnet_id] = prefix
                 else:
-                    if not llas:
-                        llas = self.intf_driver.get_llas(router['gw_interface'],
-                                                         router['ns_name'])
+                    if not lla:
+                        lla = self.intf_driver.get_llas(router['gw_interface'],
+                                                        router['ns_name'])
 
-                    if self._ensure_lla('%s/64' % pdo['bind_lla'], llas):
+                    if self._ensure_lla('%s/64' % pdo['bind_lla'], lla):
                         dibbler.enable_ipv6_pd(self.pmon,
                                                router_id,
                                                router['ns_name'],

@@ -14,13 +14,11 @@
 #    under the License.
 
 import jinja2
-import netaddr
 import os
-from oslo.config import cfg
+from oslo_config import cfg
 import shutil
 import six
 
-from neutron.agent.linux import external_process
 from neutron.agent.linux import utils
 from neutron.common import constants
 from neutron.openstack.common import log as logging
@@ -64,6 +62,7 @@ SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
 neutron-pd-notify $1 {{ prefix_path }} {{ l3_agent_pid }}
 """)
 
+
 def _get_dibbler_client_working_area(subnet_id):
     return "%s/%s" % (cfg.CONF.pd_confs, subnet_id)
 
@@ -76,9 +75,11 @@ def _get_prefix_path(subnet_id):
     dcwa = _get_dibbler_client_working_area(subnet_id)
     return "%s/prefix" % dcwa
 
+
 def _get_pid_path(subnet_id):
     dcwa = _get_dibbler_client_working_area(subnet_id)
     return "%s/client.pid" % dcwa
+
 
 def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     dcwa = _get_dibbler_client_working_area(subnet_id)
@@ -111,7 +112,6 @@ def _spawn_dibbler(pmon, router_id, subnet_id, lla,
                        '-A', '%s' % lla]
         return dibbler_cmd
 
-    pid_file = _get_pid_path(subnet_id)
     pmon.enable(subnet_id,
                 cmd_callback=callback,
                 namespace=router_ns,

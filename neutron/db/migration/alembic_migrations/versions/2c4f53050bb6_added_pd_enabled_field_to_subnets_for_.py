@@ -29,13 +29,11 @@ from alembic import op
 import sqlalchemy as sa
 
 
-
 def upgrade():
     op.add_column('subnets',
                   sa.Column('pd_enabled',
                             sa.Boolean(),
-                            nullable=True)
-                 )
+                            nullable=True))
 
 
 def downgrade():
