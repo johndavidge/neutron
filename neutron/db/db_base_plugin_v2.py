@@ -225,7 +225,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             # Create a set of all currently allocated addresses
             ip_qry_results = ip_qry.filter_by(subnet_id=subnet['id'])
-            allocations = netaddr.IPSet([netaddr.IPAddress(i['ip_address'])
+            allocations = netaddr.IPSet([netaddr.IPAddress(i['ip_address'],
+                                                           subnet['ip_version'])
                                         for i in ip_qry_results])
 
             for pool in pool_qry.filter_by(subnet_id=subnet['id']):
@@ -251,8 +252,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 for ip_range in ipset_to_ranges(available):
                     available_range = models_v2.IPAvailabilityRange(
                         allocation_pool_id=pool['id'],
-                        first_ip=str(netaddr.IPAddress(ip_range.first)),
-                        last_ip=str(netaddr.IPAddress(ip_range.last)))
+                        first_ip=str(netaddr.IPAddress(ip_range.first,
+                                                       subnet['ip_version'])),
+                        last_ip=str(netaddr.IPAddress(ip_range.last,
+                                                      subnet['ip_version'])))
                     context.session.add(available_range)
 
     @staticmethod
@@ -1187,7 +1190,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             first_ip=p['start'], last_ip=p['end'],
             subnet_id=id) for p in s['allocation_pools']]
         context.session.add_all(new_pools)
-        NeutronDbPluginV2._rebuild_availability_ranges(context, [s])
+        # Calling _rebuild_availability_ranges with a ::/64 appears to
+        # cause overflow. Avoid it for now.
+        if not s['pd_enabled']:
+            NeutronDbPluginV2._rebuild_availability_ranges(context, [s])
         #Gather new pools for result:
         result_pools = [{'start': pool['start'],
                          'end': pool['end']}
@@ -1210,16 +1216,18 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         # value since _validate_subnet() expects subnet spec has 'ip_version'
         # and 'allocation_pools' fields.
         s['ip_version'] = db_subnet.ip_version
+        s['pd_enabled'] = db_subnet.pd_enabled
         s['id'] = db_subnet.id
 
         update_ports_needed = False
         if s.get('cidr') is None:
             s['cidr'] = db_subnet.cidr
         else:
-            update_ports_needed = True
             # This update has been triggered by a new Prefix Delegation
-            net = netaddr.IPNetwork(subnet['subnet']['cidr'])
-            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1))
+            # or a call to reset_pd_subnet
+            update_ports_needed = True
+            net = netaddr.IPNetwork(s['cidr'], 6)
+            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1, 6))
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
 
         self._validate_subnet(context, s, cur_subnet=db_subnet)
@@ -1339,6 +1347,12 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
     def get_subnets_count(self, context, filters=None):
         return self._get_collection_count(context, models_v2.Subnet,
                                           filters=filters)
+
+    def reset_pd_subnet(self, context, subnet_id):
+        subnet = self.get_subnet(context, subnet_id)
+        if subnet.get('pd_enabled'):
+            s = {'subnet': {'cidr': constants.TEMP_PD_PREFIX}}
+            self.update_subnet(context, subnet_id, s)   
 
     def _check_mac_addr_update(self, context, port, new_mac, device_owner):
         if (device_owner and device_owner.startswith('network:')):
@@ -1473,8 +1487,17 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         return result
 
     def delete_port(self, context, id):
+        subnets = []
+        port = self.get_port(context, id)
+
+        for fixed_ip in port.get('fixed_ips'):
+            subnets.append(fixed_ip.get('subnet_id'))
+
         with context.session.begin(subtransactions=True):
             self._delete_port(context, id)
+
+        for subnet_id in subnets:
+            self.reset_pd_subnet(context, subnet_id)
 
     def delete_ports_by_device_id(self, context, device_id, network_id=None):
         query = (context.session.query(models_v2.Port.id)
