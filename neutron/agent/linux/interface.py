@@ -141,8 +141,10 @@ class LinuxInterfaceDriver(object):
 
     def delete_v6addr_with_prefix(self, device_name, prefix, namespace):
         device = ip_lib.IPDevice(device_name, namespace=namespace)
+        net = str(netaddr.IPNetwork(prefix).network)
         for address in device.addr.list(scope='global', filters=['permanent']):
-            if address['ip_version'] == 6 and address.startswith(prefix):
+            if (address['ip_version'] == 6 and
+                address['cidr'].startswith(net)):
                 device.addr.delete(6, address['cidr'])
                 self.delete_conntrack_state(namespace=namespace,
                                             ip=address['cidr'])

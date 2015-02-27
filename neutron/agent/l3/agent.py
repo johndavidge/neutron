@@ -843,7 +843,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                              namespace=ns_name,
                              prefix=prefix)
 
-        if not is_ha and internal_cidr != l3_constants.TEMP_PD_PREFIX:
+        if (not is_ha and
+            not internal_cidr.startswith(l3_constants.IPV6_UNSPECIFIED_ADDR)):
             self.driver.init_l3(interface_name, [internal_cidr],
                                 namespace=ns_name)
             ip_address = internal_cidr.split('/')[0]
