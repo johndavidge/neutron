@@ -132,12 +132,21 @@ class LinuxInterfaceDriver(object):
         net = netaddr.IPNetwork(v6addr)
         device.addr.add(6, str(net), str(net.broadcast))
 
-    def delete_lla(self, device_name, lla, namespace):
+    def delete_v6addr(self, device_name, v6addr, namespace):
         device = ip_lib.IPDevice(device_name,
                                  namespace=namespace)
-        device.addr.delete(6, lla)
+        device.addr.delete(6, v6addr)
         self.delete_conntrack_state(namespace=namespace,
-                                    ip=lla)
+                                    ip=v6addr)
+
+    def delete_v6addr_with_prefix(self, device_name, prefix, namespace):
+        device = ip_lib.IPDevice(device_name, namespace=namespace)
+        for address in device.addr.list(scope='global', filters=['permanent']):
+            if address['ip_version'] == 6 and address.startswith(prefix):
+                device.addr.delete(6, address['cidr'])
+                self.delete_conntrack_state(namespace=namespace,
+                                            ip=address['cidr'])
+                break;
 
     def get_llas(self, device_name, namespace):
         device = ip_lib.IPDevice(device_name,

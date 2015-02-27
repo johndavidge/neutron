@@ -30,6 +30,10 @@ OPTS = [
     cfg.StrOpt('pd_confs',
                default='$state_path/pd',
                help=_('Location to store IPv6 PD config files')),
+    cfg.StrOpt('vrpen',
+               default='8888',
+               help=_("A decimal value as Vendor's Registered Private "
+                      "Enterprise Number as required by RFC3315 DUID-EN")),
 ]
 
 cfg.CONF.register_opts(OPTS)
@@ -62,31 +66,38 @@ SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
 neutron-pd-notify $1 {{ prefix_path }} {{ l3_agent_pid }}
 """)
 
+def _get_requestor_id(router_id, subnet_id, ri_ifname):
+    return "%s:%s:%s" % (router_id, subnet_id, ri_ifname)
 
-def _get_dibbler_client_working_area(subnet_id):
-    return "%s/%s" % (cfg.CONF.pd_confs, subnet_id)
+
+def _get_dibbler_client_working_area(requestor_id):
+    return "%s/%s" % (cfg.CONF.pd_confs, requestor_id)
 
 
 def _convert_subnet_id(subnet_id):
     return ''.join(subnet_id.split('-'))
 
 
-def _get_prefix_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+def _get_prefix_path(requestor_id):
+    dcwa = _get_dibbler_client_working_area(requestor_id)
     return "%s/prefix" % dcwa
 
 
-def _get_pid_path(subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+def _get_pid_path(requestor_id):
+    dcwa = _get_dibbler_client_working_area(requestor_id)
     return "%s/client.pid" % dcwa
 
 
-def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+def _is_dibbler_client_running(requestor_id):
+    return utils.get_value_from_file(_get_pid_path(requestor_id))
+
+
+def _generate_dibbler_conf(requestor_id, subnet_id, ex_gw_ifname):
+    dcwa = _get_dibbler_client_working_area(requestor_id)
     script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
     buf = six.StringIO()
     buf.write('%s' % SCRIPT_TEMPLATE.render(
-                         prefix_path=_get_prefix_path(subnet_id),
+                         prefix_path=_get_prefix_path(requestor_id),
                          l3_agent_pid=os.getpid()))
     utils.replace_file(script_path, buf.getvalue())
     os.chmod(script_path, 0o744)
@@ -94,7 +105,7 @@ def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     dibbler_conf = utils.get_conf_file_name(dcwa, 'client', 'conf', False)
     buf = six.StringIO()
     buf.write('%s' % CONFIG_TEMPLATE.render(
-                         enterprise_number=8888,
+                         enterprise_number=cfg.CONF.vrpen,
                          va_id='0x%s' % _convert_subnet_id(subnet_id),
                          script_path='"%s/notify.sh"' % dcwa,
                          interface_name='"%s"' % ex_gw_ifname))
@@ -103,7 +114,7 @@ def _generate_dibbler_conf(router_id, subnet_id, ex_gw_ifname):
     return dcwa
 
 
-def _spawn_dibbler(pmon, router_id, subnet_id, lla,
+def _spawn_dibbler(pmon, requestor_id, lla,
                    dibbler_conf, router_ns):
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
@@ -112,31 +123,31 @@ def _spawn_dibbler(pmon, router_id, subnet_id, lla,
                        '-A', '%s' % lla]
         return dibbler_cmd
 
-    pmon.enable(subnet_id,
+    pmon.enable(requestor_id,
                 cmd_callback=callback,
                 namespace=router_ns,
                 service='dibbler',
-                pid_file=_get_pid_path(subnet_id))
-    LOG.debug("dibbler client enabled for router %s subnet %s",
-              router_id, subnet_id)
+                pid_file=_get_pid_path(requestor_id))
 
 
-def _is_dibbler_client_running(subnet_id):
-    return utils.get_value_from_file(_get_pid_path(subnet_id))
-
-
-def enable_ipv6_pd(pmon, router_id, router_ns, subnet_id,
+def enable_ipv6_pd(pmon, router_id, subnet_id, ri_ifname, router_ns,
                    ex_gw_ifname, lla):
-    LOG.debug("Enable IPv6 PD for router %s subnet %s", router_id, subnet_id)
-    if not _is_dibbler_client_running(subnet_id):
-        dibbler_conf = _generate_dibbler_conf(router_id,
+    LOG.debug("Enable IPv6 PD for router %s subnet %s ri_ifname %s",
+              router_id, subnet_id, ri_ifname)
+    requestor_id = _get_requestor_id(router_id, subnet_id, ri_ifname)
+    if not _is_dibbler_client_running(requestor_id):
+        dibbler_conf = _generate_dibbler_conf(requestor_id,
                                               subnet_id, ex_gw_ifname)
-        _spawn_dibbler(pmon, router_id, subnet_id, lla,
-                       dibbler_conf, router_ns)
+        _spawn_dibbler(pmon, requestor_id, lla, dibbler_conf, router_ns)
+        LOG.debug("dibbler client enabled for router %s subnet %s"
+                  " ri_ifname %s", router_id, subnet_id, ri_ifname)
 
 
-def disable_ipv6_pd(pmon, router_id, router_ns, subnet_id):
-    dcwa = _get_dibbler_client_working_area(subnet_id)
+def disable_ipv6_pd(pmon, router_id, subnet_id, ri_ifname, router_ns):
+    LOG.debug("Disable IPv6 PD for router %s subnet %s ri_ifname %s",
+              router_id, subnet_id, ri_ifname)
+    requestor_id = _get_requestor_id(router_id, subnet_id, ri_ifname)
+    dcwa = _get_dibbler_client_working_area(requestor_id)
 
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
@@ -144,19 +155,40 @@ def disable_ipv6_pd(pmon, router_id, router_ns, subnet_id):
                        '-W', '%s' % dcwa]
         return dibbler_cmd
 
-    pmon.disable(subnet_id,
+    pmon.disable(requestor_id,
                  cmd_callback=callback,
                  namespace=router_ns,
                  service='dibbler',
-                 pid_file=_get_pid_path(subnet_id))
+                 pid_file=_get_pid_path(requestor_id))
     shutil.rmtree(dcwa, ignore_errors=True)
-    LOG.debug("dibbler client disabled for router %s subnet %s",
-              router_id, subnet_id)
+    LOG.debug("dibbler client disabled for router %s subnet %s ri_ifname %s",
+              router_id, subnet_id, ri_ifname)
 
 
-def get_prefix(subnet_id):
-    prefix_fname = _get_prefix_path(subnet_id)
+def get_prefix(router_id, subnet_id, ri_ifname):
+    requestor_id = _get_requestor_id(router_id, subnet_id, ri_ifname)
+    prefix_fname = _get_prefix_path(requestor_id)
     prefix = utils.get_value_from_file(prefix_fname)
     if not prefix:
         prefix = constants.TEMP_PD_PREFIX
     return prefix
+
+def get_sync_data():
+    sync_data = []
+    try:
+        requestor_ids = os.listdir(cfg.CONF.pd_confs)
+    except OSError:
+        pass
+
+    for requestor_id in requestor_ids:
+        requestor_info = {}
+        router_id, subnet_id, ri_ifname = requestor_id.split(":")
+        requestor_info['router_id'] = router_id
+        requestor_info['subnet_id'] = subnet_id
+        requestor_info['ri_ifname'] = ri_ifname
+        requestor_info['client_started'] = _is_dibbler_client_running(
+                                               requestor_id)
+        requestor_info['prefix'] = get_prefix(router_id,
+                                              subnet_id, ri_ifname)
+        sync_data.append(requestor_info)
+    return sync_data

@@ -985,7 +985,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             # NOTE(salv-orlando): There is slight chance of a race, when
             # a subnet-update and a router-interface-add operation are
             # executed concurrently
-            if cur_subnet:
+            if cur_subnet and not s['pd_enabled']:
                 alloc_qry = context.session.query(models_v2.IPAllocation)
                 allocated = alloc_qry.filter_by(
                     ip_address=cur_subnet['gateway_ip'],

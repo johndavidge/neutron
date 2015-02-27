@@ -297,6 +297,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
     def _destroy_router_namespace(self, ns):
         router_id = self.get_router_id(ns)
+        if self._clean_stale_namespaces:
+            self.pd.remove_router(router_id)
         if router_id in self.router_info:
             ri = self.router_info[router_id]
             ri.radvd.disable()
@@ -462,6 +464,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             if p['subnet'].get('pd_enabled', pd_enabled):
                 interface_name = self.get_internal_device_name(p['id'])
                 self.pd.enable_subnet(ri.router['id'], p['subnet']['id'],
+                                      p['subnet']['cidr'],
                                       interface_name, p['mac_address'])
             self._set_subnet_info(p)
             self.internal_network_added(ri, p)
@@ -481,11 +484,14 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 old_ipv6_port = True
 
         for p in update_ports:
-            if (p['subnet'].get('pd_enabled', pd_enabled) and
-                self.pd.update_subnet(ri.router['id'], p['subnet']['id'])):
+            if (p['subnet'].get('pd_enabled', pd_enabled)):
+                old_prefix = self.pd.update_subnet(ri.router['id'],
+                                                   p['subnet']['id'],
+                                                   p['subnet']['cidr'])
                 self._set_subnet_info(p)
-                self._internal_network_updated(ri, p)
-                new_ipv6_port = True
+                if old_prefix:
+                    self._internal_network_updated(ri, p, old_prefix)
+                    new_ipv6_port = True
 
         # Enable RA
         if new_ipv6_port or old_ipv6_port:
@@ -500,6 +506,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         for stale_dev in stale_devs:
             LOG.debug('Deleting stale internal router device: %s',
                       stale_dev)
+            self.pd.remove_stale_ri_ifname(ri.router['id'], stale_dev)
             self.driver.unplug(stale_dev,
                                namespace=ri.ns_name,
                                prefix=INTERNAL_DEV_PREFIX)
@@ -538,6 +545,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         for stale_dev in stale_devs:
             LOG.debug('Deleting stale external router device: %s',
                       stale_dev)
+            self.pd.remove_gw_interface(ri.router['id'])
             self.driver.unplug(stale_dev,
                                bridge=self.conf.external_network_bridge,
                                namespace=ri.ns_name,
@@ -606,6 +614,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             ri.fip_ns.scan_fip_ports(ri)
         self._process_internal_ports(ri)
         self._process_external(ri)
+        self.pd.sync_router(ri.router['id'])
         # Process static routes for router
         ri.routes_updated()
 
@@ -843,12 +852,16 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                                        ip_address,
                                        self.conf.send_arp_for_ha)
 
-    def _internal_network_updated(self, ri, port):
+    def _internal_network_updated(self, ri, port, old_prefix):
         port_id = port['id']
         internal_cidr = port['ip_cidr']
 
         interface_name = self.get_internal_device_name(port_id)
-        self.driver.add_v6addr(interface_name, internal_cidr, ri.ns_name)
+        if port['subnet']['cidr'] != l3_constants.TEMP_PD_PREFIX:
+            self.driver.add_v6addr(interface_name, internal_cidr, ri.ns_name)
+        else:
+            self.driver.delete_v6addr_with_prefix(interface_name, old_prefix,
+                                                  ri.ns_name)
 
     def internal_network_added(self, ri, port):
         network_id = port['network_id']
@@ -1001,7 +1014,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         for rp, update in self._queue.each_update_to_next_router():
             LOG.debug("Starting router update for %s", update.id)
             if update.action == queue.PD_UPDATE:
-                self.pd.run_pd_client(self.context)
+                self.pd.run_pd_client()
                 continue
 
             router = update.router
