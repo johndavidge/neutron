@@ -526,12 +526,8 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                                           subnet['network_id'],
                                           subnet_id,
                                           subnet['cidr'])
-        if subnet['cidr'] == l3_constants.TEMP_PD_PREFIX:
-            fixed_ip = {'ip_address': l3_constants.TEMP_PD_ADDRESS,
-                        'subnet_id': subnet['id']}
-        else:
-            fixed_ip = {'ip_address': subnet['gateway_ip'],
-                        'subnet_id': subnet['id']}
+        fixed_ip = {'ip_address': subnet['gateway_ip'],
+                    'subnet_id': subnet['id']}
 
         return self._core_plugin.create_port(context, {
             'port':

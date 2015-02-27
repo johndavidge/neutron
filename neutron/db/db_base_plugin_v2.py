@@ -1490,7 +1490,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         subnets = []
         port = self.get_port(context, id)
         
-        if 'router_interface' in port['device_owner']:
+        if 'router_interface' in port.get('device_owner'):
             for fixed_ip in port.get('fixed_ips'):
                 subnets.append(fixed_ip.get('subnet_id'))
 
