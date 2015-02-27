@@ -138,7 +138,7 @@ IPV6_LLA_PREFIX = 'fe80::/64'
 
 # Special temporary prefix and address for IPv6 Prefix Delegation
 TEMP_PD_PREFIX = '::/64'
-TEMP_PD_ADDRESS = '::'
+TEMP_PD_ADDRESS = '::1'
 
 # Linux interface max length
 DEVICE_NAME_MAX_LEN = 15
