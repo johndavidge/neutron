@@ -182,7 +182,8 @@ class PrefixDelegation(object):
             new_mac[0] = "%02x" % (byte0 - 1)
         else:
             new_mac[0] = "%02x" % (byte0 + 1)
-        lla = ipv6_utils.get_ipv6_addr_by_EUI64("fe80::/64", ':'.join(new_mac))
+        lla = ipv6_utils.get_ipv6_addr_by_EUI64(l3_constants.IPV6_LLA_PREFIX,
+                                                ':'.join(new_mac))
         return lla
 
     def _add_lla_address(self, router, lla_with_mask):
@@ -199,7 +200,7 @@ class PrefixDelegation(object):
                              lla_with_mask)
 
     def _delete_lla_address(self, router, lla_with_mask):
-        if lla_with_mask:
+        if lla_with_mask and router['gw_interface']:
             try:
                 self.intf_driver.delete_v6addr(router['gw_interface'],
                                             lla_with_mask, router['ns_name'])
