@@ -1228,6 +1228,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             # This update has been triggered by a new Prefix Delegation
             # or a call to reset_pd_subnet
             update_ports_needed = True
+            if s['cidr'] == constants.TEMP_PD_PREFIX:
+                # This update has been called as a result of reset_pd_cidr
+                # Therefore do not update ports
+                update_ports_needed = False
             net = netaddr.IPNetwork(s['cidr'], s['ip_version'])
             s['gateway_ip'] = self.generate_gw_ip(net, s['ip_version'])
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
