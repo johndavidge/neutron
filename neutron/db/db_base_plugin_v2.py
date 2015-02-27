@@ -1040,6 +1040,9 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                     pool=pool_range,
                     ip_address=gateway_ip)
 
+    def generate_gw_ip(self, net, ip_version):
+        return str(netaddr.IPAddress(net.first + 1, ip_version))
+
     def create_subnet(self, context, subnet):
 
         net = netaddr.IPNetwork(subnet['subnet']['cidr'])
@@ -1065,8 +1068,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             s['ip_version'] = 4
 
         if s['gateway_ip'] is attributes.ATTR_NOT_SPECIFIED:
-            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1,
-                                                    s['ip_version']))
+            s['gateway_ip'] = self.generate_gw_ip(net, s['ip_version'])
 
         if s['allocation_pools'] == attributes.ATTR_NOT_SPECIFIED:
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
@@ -1226,8 +1228,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             # This update has been triggered by a new Prefix Delegation
             # or a call to reset_pd_subnet
             update_ports_needed = True
-            net = netaddr.IPNetwork(s['cidr'], 6)
-            s['gateway_ip'] = str(netaddr.IPAddress(net.first + 1, 6))
+            net = netaddr.IPNetwork(s['cidr'], s['ip_version'])
+            s['gateway_ip'] = self.generate_gw_ip(net, s['ip_version'])
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
 
         self._validate_subnet(context, s, cur_subnet=db_subnet)
