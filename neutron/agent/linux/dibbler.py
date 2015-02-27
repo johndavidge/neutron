@@ -188,7 +188,7 @@ def get_sync_data():
         try:
             router_id, subnet_id, ri_ifname = requestor_id.split(":")
         except:
-            pass
+            continue
         requestor_info['router_id'] = router_id
         requestor_info['subnet_id'] = subnet_id
         requestor_info['ri_ifname'] = ri_ifname
