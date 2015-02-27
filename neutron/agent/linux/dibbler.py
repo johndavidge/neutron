@@ -182,7 +182,13 @@ def get_sync_data():
 
     for requestor_id in requestor_ids:
         requestor_info = {}
-        router_id, subnet_id, ri_ifname = requestor_id.split(":")
+        router_id = None
+        subnet_id = None
+        ri_ifname = None
+        try:
+            router_id, subnet_id, ri_ifname = requestor_id.split(":")
+        except:
+            pass
         requestor_info['router_id'] = router_id
         requestor_info['subnet_id'] = subnet_id
         requestor_info['ri_ifname'] = ri_ifname
