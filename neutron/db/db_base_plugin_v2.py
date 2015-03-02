@@ -225,9 +225,9 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             # Create a set of all currently allocated addresses
             ip_qry_results = ip_qry.filter_by(subnet_id=subnet['id'])
-            allocations = netaddr.IPSet([netaddr.IPAddress(i['ip_address'],
-                                                           subnet['ip_version'])
-                                        for i in ip_qry_results])
+            allocs = netaddr.IPSet([netaddr.IPAddress(i['ip_address'],
+                                                      subnet['ip_version'])
+                                   for i in ip_qry_results])
 
             for pool in pool_qry.filter_by(subnet_id=subnet['id']):
                 # Create a set of all addresses in the pool
@@ -235,7 +235,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                                                         pool['last_ip']))
 
                 # Use set difference to find free addresses in the pool
-                available = poolset - allocations
+                available = poolset - allocs
 
                 # Generator compacts an ip set into contiguous ranges
                 def ipset_to_ranges(ipset):
@@ -397,7 +397,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             if 'ip_address' in fixed:
                 # Ignore Prefix Delegation enabled subnets
-                if not subnet['pd_enabled']:
+                if not subnet['ipv6_pd_enabled']:
                     # Ensure that the IP's are unique
                     if not NeutronDbPluginV2._check_unique_ip(
                                              context,
@@ -822,7 +822,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                'host_routes': [{'destination': route['destination'],
                                 'nexthop': route['nexthop']}
                                for route in subnet['routes']],
-               'pd_enabled': subnet['pd_enabled'],
+               'ipv6_pd_enabled': subnet['ipv6_pd_enabled'],
                'shared': subnet['shared']
                }
         # Call auxiliary extend functions, if any
@@ -985,7 +985,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             # NOTE(salv-orlando): There is slight chance of a race, when
             # a subnet-update and a router-interface-add operation are
             # executed concurrently
-            if cur_subnet and not s['pd_enabled']:
+            if cur_subnet and not s['ipv6_pd_enabled']:
                 alloc_qry = context.session.query(models_v2.IPAllocation)
                 allocated = alloc_qry.filter_by(
                     ip_address=cur_subnet['gateway_ip'],
@@ -1050,11 +1050,11 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         subnet['subnet']['cidr'] = '%s/%s' % (net.network, net.prefixlen)
 
         s = subnet['subnet']
-        s['pd_enabled'] = False
+        s['ipv6_pd_enabled'] = False
 
         # Check for temporary CIDRs used for Prefix Delegation
         if subnet['subnet']['cidr'] == constants.TEMP_PD_PREFIX:
-            s['pd_enabled'] = True
+            s['ipv6_pd_enabled'] = True
             # Make sure ip_version is set to 6
             s['ip_version'] = 6
             # Make sure RA and Address modes are SLAAC,
@@ -1084,9 +1084,9 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         with context.session.begin(subtransactions=True):
             network = self._get_network(context, s["network_id"])
             # Do not check for CIDR overlap if subnet is PD enabled
-            if not s['pd_enabled']:
+            if not s['ipv6_pd_enabled']:
                 self._validate_subnet_cidr(context, network, s['cidr'])
-            # The 'shared' and 'pd_enabled' attributes for subnets are for
+            # The 'shared' and 'ipv6_pd_enabled' attributes for subnets are for
             # internal plugin use only. They are not exposed through the API
             args = {'tenant_id': tenant_id,
                     'id': s.get('id') or uuidutils.generate_uuid(),
@@ -1096,7 +1096,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                     'cidr': s['cidr'],
                     'enable_dhcp': s['enable_dhcp'],
                     'gateway_ip': s['gateway_ip'],
-                    'pd_enabled': s['pd_enabled'],
+                    'ipv6_pd_enabled': s['ipv6_pd_enabled'],
                     'shared': network.shared}
             if s['ip_version'] == 6 and s['enable_dhcp']:
                 if attributes.is_attr_set(s['ipv6_ra_mode']):
@@ -1194,7 +1194,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         context.session.add_all(new_pools)
         # Calling _rebuild_availability_ranges with a ::/64 appears to
         # cause overflow. Avoid it for now.
-        if not s['pd_enabled']:
+        if not s['ipv6_pd_enabled']:
             NeutronDbPluginV2._rebuild_availability_ranges(context, [s])
         #Gather new pools for result:
         result_pools = [{'start': pool['start'],
@@ -1216,7 +1216,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         db_subnet = self._get_subnet(context, id)
 
         s['ip_version'] = db_subnet.ip_version
-        s['pd_enabled'] = db_subnet.pd_enabled
+        s['ipv6_pd_enabled'] = db_subnet.ipv6_pd_enabled
         s['id'] = db_subnet.id
 
         update_ports_needed = False

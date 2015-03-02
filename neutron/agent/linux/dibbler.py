@@ -68,6 +68,7 @@ SCRIPT_TEMPLATE = jinja2.Template("""#!/bin/bash
 neutron-pd-notify $1 {{ prefix_path }} {{ l3_agent_pid }}
 """)
 
+
 def _get_requestor_id(router_id, subnet_id, ri_ifname):
     return "%s:%s:%s" % (router_id, subnet_id, ri_ifname)
 
@@ -175,6 +176,7 @@ def get_prefix(router_id, subnet_id, ri_ifname):
         prefix = constants.TEMP_PD_PREFIX
     return prefix
 
+
 def get_sync_data():
     sync_data = []
     try:
@@ -189,7 +191,7 @@ def get_sync_data():
         ri_ifname = None
         try:
             router_id, subnet_id, ri_ifname = requestor_id.split(":")
-        except:
+        except Exception:
             continue
         requestor_info['router_id'] = router_id
         requestor_info['subnet_id'] = subnet_id

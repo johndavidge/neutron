@@ -13,7 +13,7 @@
 #    under the License.
 #
 
-"""Added pd_enabled field to Subnets for Prefix Delegation
+"""Added ipv6_pd_enabled field to Subnets for Prefix Delegation
 
 Revision ID: 2c4f53050bb6
 Revises: 2d2a8a565438
@@ -31,10 +31,10 @@ import sqlalchemy as sa
 
 def upgrade():
     op.add_column('subnets',
-                  sa.Column('pd_enabled',
+                  sa.Column('ipv6_pd_enabled',
                             sa.Boolean(),
                             nullable=True))
 
 
 def downgrade():
-    op.drop_column('subnets', 'pd_enabled')
+    op.drop_column('subnets', 'ipv6_pd_enabled')

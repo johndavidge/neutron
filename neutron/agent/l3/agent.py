@@ -459,9 +459,9 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         new_ipv6_port = False
         old_ipv6_port = False
-        pd_enabled = False
+        ipv6_pd_enabled = False
         for p in new_ports:
-            if p['subnet'].get('pd_enabled', pd_enabled):
+            if p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled):
                 interface_name = self.get_internal_device_name(p['id'])
                 self.pd.enable_subnet(ri.router['id'], p['subnet']['id'],
                                       p['subnet']['cidr'],
@@ -475,7 +475,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 new_ipv6_port = True
 
         for p in old_ports:
-            if p['subnet'].get('pd_enabled', pd_enabled):
+            if p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled):
                 self.pd.disable_subnet(ri.router['id'], p['subnet']['id'])
             self.internal_network_removed(ri, p)
             ri.internal_ports.remove(p)
@@ -484,7 +484,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 old_ipv6_port = True
 
         for p in update_ports:
-            if (p['subnet'].get('pd_enabled', pd_enabled)):
+            if (p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled)):
                 old_prefix = self.pd.update_subnet(ri.router['id'],
                                                    p['subnet']['id'],
                                                    p['subnet']['cidr'])

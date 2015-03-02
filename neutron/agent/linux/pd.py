@@ -19,7 +19,7 @@ import signal
 from neutron.agent.linux import dibbler
 from neutron.common import constants as l3_constants
 from neutron.common import ipv6_utils
-from neutron.i18n import _LE, _LI, _LW
+from neutron.i18n import _LE
 from neutron.openstack.common import log as logging
 
 
@@ -57,12 +57,16 @@ class PrefixDelegation(object):
                 # Although it's not possible for this to happen, log an error
                 # to catch it in case it happens
                 if ri_ifname != pdo['ri_ifname']:
-                    LOG.error(_LE("Error enabling pd for router_id %s "
-                                  "subnet_id %s ri_ifname %s prefix %s "
+                    LOG.error(_LE("Error enabling pd for router_id "
+                                  "%(router_id)s subnet_id %(subnet_id)s "
+                                  "ri_ifname %(ri_ifname)s prefix %(prefix)s "
                                   "since router interface is out of sync "
-                                  "with previous ri_ifname %s"),
-                                  router_id, subnet_id, ri_ifname,
-                                  prefix, pdo['ri_ifname'])
+                                  "with previous ri_ifname %(pdo)s"),
+                              {'router_id': router_id,
+                               'subnet_id': subnet_id,
+                               'ri_ifname': ri_ifname,
+                               'prefix': prefix,
+                               'pdo': pdo['ri_ifname']})
                 else:
                     pdo['mac'] = mac
                     pdo['old_prefix'] = prefix
@@ -116,8 +120,10 @@ class PrefixDelegation(object):
                         if pdo['prefix'] != pdo['old_prefix']:
                             prefix_update['subnet_id'] = pdo['prefix']
                     else:
-                        self._delete_lla_address(router, pdo['bind_lla_with_mask'])
-                        self._add_lla_address(router, pdo['bind_lla_with_mask'])
+                        self._delete_lla_address(router,
+                                                 pdo['bind_lla_with_mask'])
+                        self._add_lla_address(router,
+                                              pdo['bind_lla_with_mask'])
                 else:
                     self._add_lla_address(router, pdo['bind_lla_with_mask'])
         if prefix_update:
@@ -138,7 +144,6 @@ class PrefixDelegation(object):
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
             self.notifier.send_prefix_update(self.context, prefix_update)
-
 
     def remove_gw_interface(self, router_id):
         router = self.routers.get(router_id)
@@ -258,8 +263,9 @@ class PrefixDelegation(object):
                         prefix_update[subnet_id] = prefix
                 else:
                     if not llas:
-                        llas = self.intf_driver.get_llas(router['gw_interface'],
-                                                         router['ns_name'])
+                        llas = self.intf_driver.get_llas(
+                                                router['gw_interface'],
+                                                router['ns_name'])
 
                     if self._ensure_lla(pdo['bind_lla_with_mask'], llas):
                         dibbler.enable_ipv6_pd(self.pmon,

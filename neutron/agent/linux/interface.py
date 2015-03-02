@@ -148,7 +148,7 @@ class LinuxInterfaceDriver(object):
                 device.addr.delete(6, address['cidr'])
                 self.delete_conntrack_state(namespace=namespace,
                                             ip=address['cidr'])
-                break;
+                break
 
     def get_llas(self, device_name, namespace):
         device = ip_lib.IPDevice(device_name,
