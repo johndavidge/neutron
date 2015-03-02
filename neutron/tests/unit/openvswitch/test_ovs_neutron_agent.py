@@ -577,8 +577,8 @@ class TestOvsNeutronAgent(base.BaseTestCase):
             parent.attach_mock(addveth_fn, 'add_veth')
             addveth_fn.return_value = (ip_lib.IPDevice("int-br-eth1"),
                                        ip_lib.IPDevice("phy-br-eth1"))
-            ovs_addport_fn.return_value = "int_ofport"
-            br_addport_fn.return_value = "phys_veth"
+            ovs_addport_fn.return_value = "phys_veth_ofport"
+            br_addport_fn.return_value = "int_veth_ofport"
             get_br_fn.return_value = ["br-eth"]
             self.agent.setup_physical_bridges({"physnet1": "br-eth"})
             expected_calls = [mock.call.link_delete(),
@@ -589,9 +589,9 @@ class TestOvsNeutronAgent(base.BaseTestCase):
                                                  'phy-br-eth')]
             parent.assert_has_calls(expected_calls, any_order=False)
             self.assertEqual(self.agent.int_ofports["physnet1"],
-                             "phys_veth")
+                             "int_veth_ofport")
             self.assertEqual(self.agent.phys_ofports["physnet1"],
-                             "int_ofport")
+                             "phys_veth_ofport")
 
     def test_get_peer_name(self):
             bridge1 = "A_REALLY_LONG_BRIDGE_NAME1"
@@ -862,6 +862,21 @@ class TestOvsNeutronAgent(base.BaseTestCase):
             do_action_flows_fn.assert_has_calls(expected_calls)
             self.assertEqual(len(expected_calls),
                              len(do_action_flows_fn.mock_calls))
+
+    def test_del_fdb_flow_idempotency(self):
+        lvm = mock.Mock()
+        lvm.network_type = 'gre'
+        lvm.vlan = 'vlan1'
+        lvm.segmentation_id = 'seg1'
+        lvm.tun_ofports = set(['1', '2'])
+        with contextlib.nested(
+            mock.patch.object(self.agent.tun_br, 'mod_flow'),
+            mock.patch.object(self.agent.tun_br, 'delete_flows')
+        ) as (mod_flow_fn, delete_flows_fn):
+            self.agent.del_fdb_flow(self.agent.tun_br, n_const.FLOODING_ENTRY,
+                                    '1.1.1.1', lvm, '3')
+            self.assertFalse(mod_flow_fn.called)
+            self.assertFalse(delete_flows_fn.called)
 
     def test_recl_lv_port_to_preserve(self):
         self._prepare_l2_pop_ofports()

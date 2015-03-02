@@ -38,6 +38,7 @@ Neutron Internals
 .. toctree::
    :maxdepth: 3
 
+   services_and_agents
    api_layer
    api_extensions
    plugin-api
@@ -47,6 +48,7 @@ Neutron Internals
    l2_agents
    advanced_services
    oslo-incubator
+   callbacks
 
 
 Module Reference

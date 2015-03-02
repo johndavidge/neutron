@@ -220,8 +220,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
         self.use_ipv6 = ipv6_utils.is_enabled()
 
         if self.conf.enable_metadata_proxy:
-            driver = metadata_driver.MetadataDriver.instance(self)
-            self.event_observers.add(driver)
+            self.metadata_driver = metadata_driver.MetadataDriver(self)
+            self.event_observers.add(self.metadata_driver)
 
         self.pd = pd.PrefixDelegation(self.context, self.process_monitor,
                                       self.driver, self.plugin_rpc,

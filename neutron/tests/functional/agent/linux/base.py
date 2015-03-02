@@ -20,7 +20,6 @@ from neutron.agent.linux import ovs_lib
 from neutron.agent.linux import utils
 from neutron.common import constants as n_const
 from neutron.openstack.common import uuidutils
-from neutron.tests.functional.agent.linux import helpers
 from neutron.tests.functional import base as functional_base
 from neutron.tests import sub_base
 
@@ -161,11 +160,6 @@ class BaseIPVethTestCase(BaseLinuxTestCase):
     SRC_ADDRESS = '192.168.0.1'
     DST_ADDRESS = '192.168.0.2'
     BROADCAST_ADDRESS = '192.168.0.255'
-
-    def setUp(self):
-        super(BaseIPVethTestCase, self).setUp()
-        self.check_sudo_enabled()
-        self.pinger = helpers.Pinger(self)
 
     @staticmethod
     def _set_ip_up(device, cidr, broadcast, ip_version=4):

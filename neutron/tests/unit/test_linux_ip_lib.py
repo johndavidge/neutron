@@ -945,10 +945,11 @@ class TestIpNeighCommand(TestIPCmdBase):
 class TestArpPing(TestIPCmdBase):
     def _test_arping(self, function, address, spawn_n, mIPWrapper):
         spawn_n.side_effect = lambda f: f()
+        ARPING_COUNT = 3
         function(mock.sentinel.ns_name,
                  mock.sentinel.iface_name,
                  address,
-                 mock.sentinel.count)
+                 ARPING_COUNT)
 
         self.assertTrue(spawn_n.called)
         mIPWrapper.assert_called_once_with(namespace=mock.sentinel.ns_name)
@@ -958,7 +959,8 @@ class TestArpPing(TestIPCmdBase):
         # Just test that arping is called with the right arguments
         arping_cmd = ['arping', '-A',
                       '-I', mock.sentinel.iface_name,
-                      '-c', mock.sentinel.count,
+                      '-c', ARPING_COUNT,
+                      '-w', mock.ANY,
                       address]
         ip_wrapper.netns.execute.assert_any_call(arping_cmd,
                                                  check_exit_code=True)
@@ -1000,3 +1002,14 @@ class TestArpPing(TestIPCmdBase):
 
         # If this was called then check_added_address probably had a assert
         self.assertFalse(device.addr.add.called)
+
+
+class TestAddNamespaceToCmd(base.BaseTestCase):
+    def test_add_namespace_to_cmd_with_namespace(self):
+        cmd = ['ping', '8.8.8.8']
+        self.assertEqual(['ip', 'netns', 'exec', 'tmp'] + cmd,
+                         ip_lib.add_namespace_to_cmd(cmd, 'tmp'))
+
+    def test_add_namespace_to_cmd_without_namespace(self):
+        cmd = ['ping', '8.8.8.8']
+        self.assertEqual(cmd, ip_lib.add_namespace_to_cmd(cmd, None))

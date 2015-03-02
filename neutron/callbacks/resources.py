@@ -1,5 +1,3 @@
-# Copyright 2014 Alcatel-Lucent USA Inc.
-#
 #    Licensed under the Apache License, Version 2.0 (the "License"); you may
 #    not use this file except in compliance with the License. You may obtain
 #    a copy of the License at
@@ -12,14 +10,14 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
-''' Nuage specific exceptions '''
+PORT = 'port'
+ROUTER = 'router'
+ROUTER_GATEWAY = 'router_gateway'
+ROUTER_INTERFACE = 'router_interface'
 
-from neutron.common import exceptions as n_exc
-
-
-class OperationNotSupported(n_exc.InvalidConfigurationOption):
-    message = _("Nuage Plugin does not support this operation: %(msg)s")
-
-
-class NuageBadRequest(n_exc.BadRequest):
-    message = _("Bad request: %(msg)s")
+VALID = (
+    PORT,
+    ROUTER,
+    ROUTER_GATEWAY,
+    ROUTER_INTERFACE,
+)
