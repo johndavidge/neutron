@@ -187,8 +187,8 @@ class ProcessMonitor(object):
         # replace the old process manager with the new one
         self._process_managers[service_id] = process_manager
 
-    def disable(self, uuid, cmd_callback=None, namespace=None, service=None,
-                pid_file=None):
+    def disable(self, uuid, namespace=None, service=None,
+                pid_file=None, cmd_callback=None):
         """Disables the process and stops monitoring it."""
         service_id = ServiceId(uuid, service)
 
