@@ -55,6 +55,8 @@ script {{ script_path }}
 
 # Ask for prefix over the external gateway interface
 iface {{ interface_name }} {
+# Bind to generated LLA
+bind-to-address {{ bind_address }}
 # ask for address
     pd 1
 }
@@ -92,7 +94,7 @@ def _is_dibbler_client_running(requestor_id):
     return utils.get_value_from_file(_get_pid_path(requestor_id))
 
 
-def _generate_dibbler_conf(requestor_id, subnet_id, ex_gw_ifname):
+def _generate_dibbler_conf(requestor_id, subnet_id, ex_gw_ifname, lla):
     dcwa = _get_dibbler_client_working_area(requestor_id)
     script_path = utils.get_conf_file_name(dcwa, 'notify', 'sh', True)
     buf = six.StringIO()
@@ -108,19 +110,19 @@ def _generate_dibbler_conf(requestor_id, subnet_id, ex_gw_ifname):
                          enterprise_number=cfg.CONF.vrpen,
                          va_id='0x%s' % _convert_subnet_id(subnet_id),
                          script_path='"%s/notify.sh"' % dcwa,
-                         interface_name='"%s"' % ex_gw_ifname))
+                         interface_name='"%s"' % ex_gw_ifname,
+                         bind_address='%s' % lla))
 
     utils.replace_file(dibbler_conf, buf.getvalue())
     return dcwa
 
 
-def _spawn_dibbler(pmon, requestor_id, lla,
+def _spawn_dibbler(pmon, requestor_id,
                    dibbler_conf, router_ns):
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
                        'start',
-                       '-W', '%s' % dibbler_conf,
-                       '-A', '%s' % lla]
+                       '-w', '%s' % dibbler_conf]
         return dibbler_cmd
 
     pmon.enable(requestor_id,
@@ -137,8 +139,8 @@ def enable_ipv6_pd(pmon, router_id, subnet_id, ri_ifname, router_ns,
     requestor_id = _get_requestor_id(router_id, subnet_id, ri_ifname)
     if not _is_dibbler_client_running(requestor_id):
         dibbler_conf = _generate_dibbler_conf(requestor_id,
-                                              subnet_id, ex_gw_ifname)
-        _spawn_dibbler(pmon, requestor_id, lla, dibbler_conf, router_ns)
+                                              subnet_id, ex_gw_ifname, lla)
+        _spawn_dibbler(pmon, requestor_id, dibbler_conf, router_ns)
         LOG.debug("dibbler client enabled for router %s subnet %s"
                   " ri_ifname %s", router_id, subnet_id, ri_ifname)
 
@@ -152,7 +154,7 @@ def disable_ipv6_pd(pmon, router_id, subnet_id, ri_ifname, router_ns):
     def callback(pid_file):
         dibbler_cmd = ['dibbler-client',
                        'stop',
-                       '-W', '%s' % dcwa]
+                       '-w', '%s' % dcwa]
         return dibbler_cmd
 
     pmon.disable(requestor_id,
