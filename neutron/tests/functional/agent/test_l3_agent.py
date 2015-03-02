@@ -31,6 +31,7 @@ from neutron.agent.linux import dhcp
 from neutron.agent.linux import external_process
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import ovs_lib
+from neutron.agent.linux import utils
 from neutron.agent.metadata import agent as metadata_agent
 from neutron.common import config as common_config
 from neutron.common import constants as l3_constants
@@ -52,7 +53,6 @@ METADATA_REQUEST_TIMEOUT = 60
 class L3AgentTestFramework(base.BaseOVSLinuxTestCase):
     def setUp(self):
         super(L3AgentTestFramework, self).setUp()
-        self.check_sudo_enabled()
         mock.patch('neutron.agent.l3.agent.L3PluginApi').start()
         self.agent = self._configure_agent('agent1')
 
@@ -98,11 +98,18 @@ class L3AgentTestFramework(base.BaseOVSLinuxTestCase):
 
         return agent
 
-    def generate_router_info(self, enable_ha):
-        return test_l3_agent.prepare_router_data(enable_snat=True,
-                                                 enable_floating_ip=True,
+    def generate_router_info(self, enable_ha, ip_version=4, extra_routes=True,
+                             enable_fip=True, enable_snat=True):
+        if ip_version == 6:
+            enable_snat = False
+            enable_fip = False
+            extra_routes = False
+
+        return test_l3_agent.prepare_router_data(ip_version=ip_version,
+                                                 enable_snat=enable_snat,
+                                                 enable_floating_ip=enable_fip,
                                                  enable_ha=enable_ha,
-                                                 extra_routes=True)
+                                                 extra_routes=extra_routes)
 
     def manage_router(self, agent, router):
         self.addCleanup(self._delete_router, agent, router['id'])
@@ -338,6 +345,9 @@ class L3AgentTestCase(L3AgentTestFramework):
             with testtools.ExpectedException(RuntimeError):
                 netcat.test_connectivity()
 
+    def test_ipv6_ha_router_lifecycle(self):
+        self._router_lifecycle(enable_ha=True, ip_version=6)
+
     def test_keepalived_configuration(self):
         router_info = self.generate_router_info(enable_ha=True)
         router = self.manage_router(self.agent, router_info)
@@ -377,15 +387,15 @@ class L3AgentTestCase(L3AgentTestFramework):
                       (new_external_device_ip, external_device_name),
                       new_config)
 
-    def _router_lifecycle(self, enable_ha):
-        router_info = self.generate_router_info(enable_ha)
+    def _router_lifecycle(self, enable_ha, ip_version=4):
+        router_info = self.generate_router_info(enable_ha, ip_version)
         router = self.manage_router(self.agent, router_info)
 
         if enable_ha:
             port = router.get_ex_gw_port()
             interface_name = self.agent.get_external_device_name(port['id'])
             self._assert_no_ip_addresses_on_interface(router, interface_name)
-            helpers.wait_until_true(lambda: router.ha_state == 'master')
+            utils.wait_until_true(lambda: router.ha_state == 'master')
 
             # Keepalived notifies of a state transition when it starts,
             # not when it ends. Thus, we have to wait until keepalived finishes
@@ -397,18 +407,23 @@ class L3AgentTestCase(L3AgentTestFramework):
                 device,
                 self.agent.get_internal_device_name,
                 router.ns_name)
-            helpers.wait_until_true(device_exists)
+            utils.wait_until_true(device_exists)
 
         self.assertTrue(self._namespace_exists(router.ns_name))
         self.assertTrue(self._metadata_proxy_exists(self.agent.conf, router))
         self._assert_internal_devices(router)
         self._assert_external_device(router)
-        self._assert_gateway(router)
-        self.assertTrue(self._floating_ips_configured(router))
-        self._assert_snat_chains(router)
-        self._assert_floating_ip_chains(router)
+        if ip_version == 4:
+            # Note(SridharG): enable the assert_gateway for IPv6 once
+            # keepalived on Ubuntu14.04 (i.e., check-neutron-dsvm-functional
+            # platform) is updated to 1.2.10 (or above).
+            # For more details: https://review.openstack.org/#/c/151284/
+            self._assert_gateway(router)
+            self.assertTrue(self._floating_ips_configured(router))
+            self._assert_snat_chains(router)
+            self._assert_floating_ip_chains(router)
+            self._assert_extra_routes(router)
         self._assert_metadata_chains(router)
-        self._assert_extra_routes(router)
 
         if enable_ha:
             self._assert_ha_device(router)
@@ -463,7 +478,7 @@ class L3AgentTestCase(L3AgentTestFramework):
         restarted_agent = l3_test_agent.TestL3NATAgent(self.agent.host,
                                                        self.agent.conf)
         self._create_router(restarted_agent, router1.router)
-        helpers.wait_until_true(lambda: self._floating_ips_configured(router1))
+        utils.wait_until_true(lambda: self._floating_ips_configured(router1))
 
 
 class L3HATestFramework(L3AgentTestFramework):
@@ -491,16 +506,16 @@ class L3HATestFramework(L3AgentTestFramework):
 
         router2 = self.manage_router(self.failover_agent, router_info_2)
 
-        helpers.wait_until_true(lambda: router1.ha_state == 'master')
-        helpers.wait_until_true(lambda: router2.ha_state == 'backup')
+        utils.wait_until_true(lambda: router1.ha_state == 'master')
+        utils.wait_until_true(lambda: router2.ha_state == 'backup')
 
         device_name = router1.get_ha_device_name(
             router1.router[l3_constants.HA_INTERFACE_KEY]['id'])
         ha_device = ip_lib.IPDevice(device_name, namespace=router1.ns_name)
         ha_device.link.set_down()
 
-        helpers.wait_until_true(lambda: router2.ha_state == 'master')
-        helpers.wait_until_true(lambda: router1.ha_state == 'fault')
+        utils.wait_until_true(lambda: router2.ha_state == 'master')
+        utils.wait_until_true(lambda: router1.ha_state == 'fault')
 
 
 class MetadataFakeProxyHandler(object):
@@ -770,17 +785,17 @@ class TestDvrRouter(L3AgentTestFramework):
         external_gw_port = floating_agent_gw_port[0]
         fip_ns = self.agent.get_fip_ns(floating_ips[0]['floating_network_id'])
         fip_ns_name = fip_ns.get_name()
-        fg_port_created_succesfully = ip_lib.device_exists_with_ip_mac(
+        fg_port_created_successfully = ip_lib.device_exists_with_ip_mac(
             fip_ns.get_ext_device_name(external_gw_port['id']),
             external_gw_port['ip_cidr'],
             external_gw_port['mac_address'],
             namespace=fip_ns_name)
-        self.assertTrue(fg_port_created_succesfully)
+        self.assertTrue(fg_port_created_successfully)
         # Check fpr-router device has been created
         device_name = fip_ns.get_int_device_name(router.router_id)
-        fpr_router_device_created_succesfully = ip_lib.device_exists(
+        fpr_router_device_created_successfully = ip_lib.device_exists(
             device_name, namespace=fip_ns_name)
-        self.assertTrue(fpr_router_device_created_succesfully)
+        self.assertTrue(fpr_router_device_created_successfully)
 
         # In the router namespace
         # Check rfp-<router-id> is created correctly

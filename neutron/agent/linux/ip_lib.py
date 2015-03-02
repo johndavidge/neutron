@@ -75,10 +75,7 @@ class SubProcessBase(object):
     def _execute(cls, options, command, args, run_as_root=False,
                  namespace=None, log_fail_as_error=True):
         opt_list = ['-%s' % o for o in options]
-        if namespace:
-            ip_cmd = ['ip', 'netns', 'exec', namespace, 'ip']
-        else:
-            ip_cmd = ['ip']
+        ip_cmd = add_namespace_to_cmd(['ip'], namespace)
         cmd = ip_cmd + opt_list + [command] + list(args)
         return utils.execute(cmd, run_as_root=run_as_root,
                              log_fail_as_error=log_fail_as_error)
@@ -653,7 +650,9 @@ def iproute_arg_supported(command, arg):
 
 
 def _arping(ns_name, iface_name, address, count):
-    arping_cmd = ['arping', '-A', '-I', iface_name, '-c', count, address]
+    # Pass -w to set timeout to ensure exit if interface removed while running
+    arping_cmd = ['arping', '-A', '-I', iface_name, '-c', count,
+                  '-w', 1.5 * count, address]
     try:
         ip_wrapper = IPWrapper(namespace=ns_name)
         ip_wrapper.netns.execute(arping_cmd, check_exit_code=True)
@@ -697,3 +696,9 @@ def send_garp_for_proxyarp(ns_name, iface_name, address, count):
 
     if count > 0:
         eventlet.spawn_n(arping_with_temporary_address)
+
+
+def add_namespace_to_cmd(cmd, namespace=None):
+    """Add an optional namespace to the command."""
+
+    return ['ip', 'netns', 'exec', namespace] + cmd if namespace else cmd
