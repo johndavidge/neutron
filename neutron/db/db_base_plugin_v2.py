@@ -1225,7 +1225,6 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         else:
             # This update has been triggered by a the process_prefix_update RPC
             update_ports_needed = True
-            send_router_update = False
             if s['cidr'] == constants.TEMP_PD_PREFIX:
                 # This update has been called as a result of the router
                 # interface being deleted, therefore do not update ports
