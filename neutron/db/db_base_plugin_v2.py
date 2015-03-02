@@ -1223,12 +1223,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         if s.get('cidr') is None:
             s['cidr'] = db_subnet.cidr
         else:
-            # This update has been triggered by a the process_prefix_update RPC
+            # This update has been triggered by the process_prefix_update RPC
             update_ports_needed = True
-            if s['cidr'] == constants.TEMP_PD_PREFIX:
-                # This update has been called as a result of the router
-                # interface being deleted, therefore do not update ports
-                update_ports_needed = False
             net = netaddr.IPNetwork(s['cidr'], s['ip_version'])
             s['gateway_ip'] = self.generate_gw_ip(net, s['ip_version'])
             s['allocation_pools'] = self._allocate_pools_for_subnet(context, s)
