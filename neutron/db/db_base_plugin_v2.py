@@ -1214,9 +1214,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         changed_dns = False
         changed_allocation_pools = False
         db_subnet = self._get_subnet(context, id)
-        # Fill 'ip_version' and 'allocation_pools' fields with the current
-        # value since _validate_subnet() expects subnet spec has 'ip_version'
-        # and 'allocation_pools' fields.
+
         s['ip_version'] = db_subnet.ip_version
         s['pd_enabled'] = db_subnet.pd_enabled
         s['id'] = db_subnet.id
@@ -1225,12 +1223,12 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         if s.get('cidr') is None:
             s['cidr'] = db_subnet.cidr
         else:
-            # This update has been triggered by a new Prefix Delegation
-            # or a call to reset_pd_subnet
+            # This update has been triggered by a the process_prefix_update RPC
             update_ports_needed = True
+            send_router_update = False
             if s['cidr'] == constants.TEMP_PD_PREFIX:
-                # This update has been called as a result of reset_pd_cidr
-                # Therefore do not update ports
+                # This update has been called as a result of the router
+                # interface being deleted, therefore do not update ports
                 update_ports_needed = False
             net = netaddr.IPNetwork(s['cidr'], s['ip_version'])
             s['gateway_ip'] = self.generate_gw_ip(net, s['ip_version'])
@@ -1353,12 +1351,6 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
     def get_subnets_count(self, context, filters=None):
         return self._get_collection_count(context, models_v2.Subnet,
                                           filters=filters)
-
-    def reset_pd_subnet(self, context, subnet_id):
-        subnet = self.get_subnet(context, subnet_id)
-        if subnet.get('pd_enabled'):
-            s = {'subnet': {'cidr': constants.TEMP_PD_PREFIX}}
-            self.update_subnet(context, subnet_id, s)   
 
     def _check_mac_addr_update(self, context, port, new_mac, device_owner):
         if (device_owner and device_owner.startswith('network:')):
@@ -1493,18 +1485,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
         return result
 
     def delete_port(self, context, id):
-        subnets = []
-        port = self.get_port(context, id)
-        
-        if 'router_interface' in port.get('device_owner'):
-            for fixed_ip in port.get('fixed_ips'):
-                subnets.append(fixed_ip.get('subnet_id'))
-
         with context.session.begin(subtransactions=True):
             self._delete_port(context, id)
-
-        for subnet_id in subnets:
-            self.reset_pd_subnet(context, subnet_id)
 
     def delete_ports_by_device_id(self, context, device_id, network_id=None):
         query = (context.session.query(models_v2.Port.id)

@@ -77,12 +77,17 @@ class PrefixDelegation(object):
                                     router['ns_name'])
 
     def disable_subnet(self, router_id, subnet_id):
+        prefix_update = {}
         router = self.routers.get(router_id)
         if router is not None:
             pdo = router['subnets'].get(subnet_id)
             if pdo:
                 self._delete_pd(router_id, router, subnet_id, pdo)
+                prefix_update[subnet_id] = l3_constants.TEMP_PD_PREFIX
                 del router['subnets'][subnet_id]
+        if prefix_update:
+            LOG.debug("Update server with prefixes: %s", prefix_update)
+            self.notifier.send_prefix_update(self.context, prefix_update)
 
     def update_subnet(self, router_id, subnet_id, prefix):
         router = self.routers.get(router_id)
