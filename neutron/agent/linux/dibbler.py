@@ -179,6 +179,7 @@ def get_prefix(router_id, subnet_id, ri_ifname):
 
 def get_sync_data():
     sync_data = []
+    requestor_ids = []
     try:
         requestor_ids = os.listdir(cfg.CONF.pd_confs)
     except OSError:

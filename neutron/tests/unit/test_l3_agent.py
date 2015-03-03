@@ -1113,7 +1113,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         """Verify that process was disabled for a router instance."""
         expected_calls = self._expected_call_lookup_ri_process_disabled(
             ri, process)
-        expected_calls.append(mock.call().disable())
+        expected_calls.append(mock.call().disable(cmd_callback=None))
         self.assertEqual(expected_calls, self.external_process.mock_calls)
 
     def test_process_router_ipv6_interface_added(self):

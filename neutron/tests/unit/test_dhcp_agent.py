@@ -700,7 +700,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         if isolated_metadata:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
-                mock.call().disable()])
+                mock.call().disable(cmd_callback=None)])
         else:
             self.assertFalse(self.external_process.call_count)
 
@@ -732,7 +732,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         if isolated_metadata:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
-                mock.call().disable()
+                mock.call().disable(cmd_callback=None)
             ])
         else:
             self.assertFalse(self.external_process.call_count)
@@ -754,7 +754,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         self.dhcp.disable_isolated_metadata_proxy(fake_network)
         self.external_process.assert_has_calls([
             self._process_manager_constructor_call(),
-            mock.call().disable()
+            mock.call().disable(cmd_callback=None)
         ])
 
     def _test_metadata_network(self, network):

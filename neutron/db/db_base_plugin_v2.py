@@ -225,8 +225,7 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
 
             # Create a set of all currently allocated addresses
             ip_qry_results = ip_qry.filter_by(subnet_id=subnet['id'])
-            allocs = netaddr.IPSet([netaddr.IPAddress(i['ip_address'],
-                                                      subnet['ip_version'])
+            allocs = netaddr.IPSet([netaddr.IPAddress(i['ip_address'])
                                    for i in ip_qry_results])
 
             for pool in pool_qry.filter_by(subnet_id=subnet['id']):
@@ -252,10 +251,8 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
                 for ip_range in ipset_to_ranges(available):
                     available_range = models_v2.IPAvailabilityRange(
                         allocation_pool_id=pool['id'],
-                        first_ip=str(netaddr.IPAddress(ip_range.first,
-                                                       subnet['ip_version'])),
-                        last_ip=str(netaddr.IPAddress(ip_range.last,
-                                                      subnet['ip_version'])))
+                        first_ip=str(netaddr.IPAddress(ip_range.first)),
+                        last_ip=str(netaddr.IPAddress(ip_range.last)))
                     context.session.add(available_range)
 
     @staticmethod
