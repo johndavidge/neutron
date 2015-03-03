@@ -159,6 +159,7 @@ class PrefixDelegation(object):
     def remove_stale_ri_ifname(self, router_id, stale_ifname):
         router = self.routers.get(router_id)
         if router is not None:
+            subnet_id = None
             for subnet_id, pdo in router['subnets'].iteritems():
                 if pdo['ri_ifname'] == stale_ifname:
                     self._delete_pd(router_id, router, subnet_id, pdo)
