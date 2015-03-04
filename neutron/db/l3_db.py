@@ -452,7 +452,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
                                % subnet_id)
                         raise n_exc.BadRequest(resource='router', msg=msg)
                     # Ignore temporary Prefix Delegation CIDRs
-                    if subnet_cidr is not l3_constants.TEMP_PD_PREFIX:
+                    if subnet_cidr != l3_constants.TEMP_PD_PREFIX:
                         sub_id = ip['subnet_id']
                         cidr = self._core_plugin._get_subnet(
                                                  context.elevated(),
@@ -513,7 +513,7 @@ class L3_NAT_dbonly_mixin(l3.RouterPluginBase):
         subnet = self._core_plugin._get_subnet(context, subnet_id)
         if not subnet['gateway_ip']:
             # Ignore temporary Prefix Delegation CIDRs
-            if subnet['cidr'] is not l3_constants.TEMP_PD_PREFIX:
+            if subnet['cidr'] != l3_constants.TEMP_PD_PREFIX:
                 msg = _('Subnet for router interface must have a gateway IP')
                 raise n_exc.BadRequest(resource='router', msg=msg)
         if (subnet['ip_version'] == 6 and subnet['ipv6_ra_mode'] is None
