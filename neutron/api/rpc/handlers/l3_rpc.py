@@ -221,5 +221,5 @@ class L3RpcCallback(object):
         subnets = kwargs.get('subnets')
 
         for (subnet_id, prefix) in subnets.iteritems():
-            return self.plugin.update_subnet(context, subnet_id,
-                                             {'subnet': {'cidr': prefix}})
+            self.plugin.update_subnet(context, subnet_id,
+                                      {'subnet': {'cidr': prefix}})

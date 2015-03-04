@@ -19,7 +19,8 @@ import signal
 from neutron.agent.linux import dibbler
 from neutron.common import constants as l3_constants
 from neutron.common import ipv6_utils
-from neutron.i18n import _LE
+from neutron.common import utils
+from neutron.i18n import _LE, _LI, _LW
 from neutron.openstack.common import log as logging
 
 
@@ -36,13 +37,14 @@ class PrefixDelegation(object):
         self.pd_update_cb = pd_update_cb
         self._get_sync_data()
 
+    @utils.synchronized("l3-agent-pd")
     def enable_subnet(self, router_id, subnet_id, prefix, ri_ifname, mac):
         router = self.routers.get(router_id)
         if router is not None:
             pdo = router['subnets'].get(subnet_id)
             if not pdo:
-                pdo = {'prefix': None,
-                       'old_prefix': prefix,
+                pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
+                       'old_prefix': l3_constants.TEMP_PD_PREFIX,
                        'ri_ifname': ri_ifname,
                        'mac': mac,
                        'bind_lla': None,
@@ -80,6 +82,7 @@ class PrefixDelegation(object):
                                     pdo['ri_ifname'],
                                     router['ns_name'])
 
+    @utils.synchronized("l3-agent-pd")
     def disable_subnet(self, router_id, subnet_id):
         prefix_update = {}
         router = self.routers.get(router_id)
@@ -93,6 +96,7 @@ class PrefixDelegation(object):
             LOG.debug("Update server with prefixes: %s", prefix_update)
             self.notifier.send_prefix_update(self.context, prefix_update)
 
+    @utils.synchronized("l3-agent-pd")
     def update_subnet(self, router_id, subnet_id, prefix):
         router = self.routers.get(router_id)
         old_prefix = None
@@ -104,6 +108,7 @@ class PrefixDelegation(object):
                 pdo['old_prefix'] = prefix
         return old_prefix
 
+    @utils.synchronized("l3-agent-pd")
     def add_gw_interface(self, router_id, gw_ifname):
         router = self.routers.get(router_id)
         prefix_update = {}
@@ -145,17 +150,20 @@ class PrefixDelegation(object):
             LOG.debug("Update server with prefixes: %s", prefix_update)
             self.notifier.send_prefix_update(self.context, prefix_update)
 
+    @utils.synchronized("l3-agent-pd")
     def remove_gw_interface(self, router_id):
         router = self.routers.get(router_id)
         if router is not None:
             router['gw_interface'] = None
             self._delete_router_pd(router_id, router)
 
+    @utils.synchronized("l3-agent-pd")
     def sync_router(self, router_id):
         router = self.routers.get(router_id)
         if router is not None and router['gw_interface'] is None:
             self._delete_router_pd(router_id, router)
 
+    @utils.synchronized("l3-agent-pd")
     def remove_stale_ri_ifname(self, router_id, stale_ifname):
         router = self.routers.get(router_id)
         if router is not None:
@@ -168,6 +176,7 @@ class PrefixDelegation(object):
                 return
             del router['subnets'][subnet_id]
 
+    @utils.synchronized("l3-agent-pd")
     def remove_router(self, router_id):
         router = self.routers.get(router_id)
         if router is not None:
@@ -175,6 +184,7 @@ class PrefixDelegation(object):
             del self.routers[router_id]['subnets']
             del self.routers[router_id]
 
+    @utils.synchronized("l3-agent-pd")
     def add_router(self, router_id, name_space):
         router = self.routers.get(router_id)
         if not router:
@@ -237,15 +247,19 @@ class PrefixDelegation(object):
                 self.pd_update_cb()
                 break
             else:
-                eventlet.sleep(5)
+                eventlet.sleep(2)
 
     @staticmethod
     def _ensure_lla(lla_with_mask, llas):
         for lla in llas:
-            if lla_with_mask == lla[0] and 'tentative' not in lla:
-                return True
+            if lla_with_mask == lla[0]:
+                if 'tentative' in lla:
+                    return False
+                else:
+                    return True
         return False
 
+    @utils.synchronized("l3-agent-pd")
     def run_pd_client(self):
         LOG.debug("Starting run_pd_client")
 
