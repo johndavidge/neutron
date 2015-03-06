@@ -20,7 +20,7 @@ from neutron.agent.linux import dibbler
 from neutron.common import constants as l3_constants
 from neutron.common import ipv6_utils
 from neutron.common import utils
-from neutron.i18n import _LE, _LI, _LW
+from neutron.i18n import _LE
 from neutron.openstack.common import log as logging
 
 
