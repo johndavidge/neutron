@@ -33,6 +33,7 @@ from neutron.agent.l3 import link_local_allocator as lla
 from neutron.agent.l3 import router_info as l3router
 from neutron.agent.linux import external_process
 from neutron.agent.linux import interface
+from neutron.agent.linux import pd
 from neutron.agent.linux import ra
 from neutron.agent.metadata import driver as metadata_driver
 from neutron.common import config as base_config
@@ -90,6 +91,34 @@ def router_append_interface(router, count=1, ip_version=4, ra_mode=None,
                         'ipv6_ra_mode': ra_mode,
                         'ipv6_address_mode': addr_mode}})
         mac_address.value += 1
+
+
+def router_append_pd_enabled_subnet(router, count=1):
+    interfaces = router[l3_constants.INTERFACE_KEY]
+    current = sum(
+        [netaddr.IPNetwork(p['subnet']['cidr']).version == 6
+         for p in interfaces])
+
+    mac_address = netaddr.EUI('ca:fe:de:ad:be:ef')
+    mac_address.dialect = netaddr.mac_unix
+    pd_intfs = []
+    for i in range(current, current + count):
+        subnet_id = _uuid()
+        intf = {'id': _uuid(),
+                'network_id': _uuid(),
+                'admin_state_up': True,
+                'fixed_ips': [{'ip_address': '::1',
+                               'subnet_id': subnet_id}],
+                'mac_address': str(mac_address),
+                'subnet': {'id': subnet_id,
+                           'cidr': l3_constants.TEMP_PD_PREFIX,
+                           'gateway_ip': '::1',
+                           'ipv6_ra_mode': l3_constants.IPV6_SLAAC,
+                           'ipv6_pd_enabled': True}}
+        interfaces.append(intf)
+        pd_intfs.append(intf)
+        mac_address.value += 1
+    return pd_intfs
 
 
 def prepare_router_data(ip_version=4, enable_snat=None, num_internal_ports=1,
@@ -1086,40 +1115,41 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         self.assertFalse(nat_rules_delta)
         return ri
 
-    def _expected_call_lookup_ri_process_enabled(self, ri, process):
+    def _expected_call_lookup_ri_process_enabled(self, ri, process,
+                                                 uuid, reload_cfg):
         """Expected call if a process is looked up in a router instance."""
-        return [mock.call(uuid=ri.router['id'],
+        return [mock.call(uuid=uuid,
                           service=process,
                           default_cmd_callback=mock.ANY,
                           namespace=ri.ns_name,
                           conf=self.conf,
-                          pid_file=None,
-                          cmd_addl_env=None)]
+                          pid_file=mock.ANY,
+                          cmd_addl_env=None),
+                mock.call().enable(reload_cfg=reload_cfg)]
 
     def _expected_call_lookup_ri_process_disabled(self, ri, process):
         """Expected call if a process is looked up in a router instance."""
         # The ProcessManager does already exist, and it's found via
         # ProcessMonitor lookup _ensure_process_manager
-        return [mock.call().__nonzero__()]
+        return [mock.call().__nonzero__(),
+                mock.call().disable(cmd_callback=mock.ANY)]
 
-    def _assert_ri_process_enabled(self, ri, process):
+    def _assert_ri_process_enabled(self, ri, process, uuid, reload_cfg):
         """Verify that process was enabled for a router instance."""
         expected_calls = self._expected_call_lookup_ri_process_enabled(
-            ri, process)
-        expected_calls.append(mock.call().enable(reload_cfg=True))
+            ri, process, uuid, reload_cfg)
         self.assertEqual(expected_calls, self.external_process.mock_calls)
 
     def _assert_ri_process_disabled(self, ri, process):
         """Verify that process was disabled for a router instance."""
         expected_calls = self._expected_call_lookup_ri_process_disabled(
             ri, process)
-        expected_calls.append(mock.call().disable(cmd_callback=None))
         self.assertEqual(expected_calls, self.external_process.mock_calls)
 
     def test_process_router_ipv6_interface_added(self):
         router = prepare_router_data()
         ri = self._process_router_ipv6_interface_added(router)
-        self._assert_ri_process_enabled(ri, 'radvd')
+        self._assert_ri_process_enabled(ri, 'radvd', ri.router['id'], True)
         # Expect radvd configured without prefix
         self.assertNotIn('prefix',
                          self.utils_replace_file.call_args[0][1].split())
@@ -1128,7 +1158,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         router = prepare_router_data()
         ri = self._process_router_ipv6_interface_added(
             router, ra_mode=l3_constants.IPV6_SLAAC)
-        self._assert_ri_process_enabled(ri, 'radvd')
+        self._assert_ri_process_enabled(ri, 'radvd', ri.router['id'], True)
         # Expect radvd configured with prefix
         self.assertIn('prefix',
                       self.utils_replace_file.call_args[0][1].split())
@@ -1145,7 +1175,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         router_append_interface(router, count=1, ip_version=6)
         # Reassign the router object to RouterInfo
         self._process_router_instance_for_agent(agent, ri, router)
-        self._assert_ri_process_enabled(ri, 'radvd')
+        self._assert_ri_process_enabled(ri, 'radvd', ri.router['id'], True)
 
     def test_process_router_interface_removed(self):
         agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
@@ -1171,7 +1201,7 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
         # Add an IPv6 interface and reprocess
         router_append_interface(router, count=1, ip_version=6)
         self._process_router_instance_for_agent(agent, ri, router)
-        self._assert_ri_process_enabled(ri, 'radvd')
+        self._assert_ri_process_enabled(ri, 'radvd', ri.router['id'], True)
         # Reset the calls so we can check for disable radvd
         self.external_process.reset_mock()
         # Remove the IPv6 interface and reprocess
@@ -1904,3 +1934,357 @@ class TestBasicRouterOperations(BasicRouterOperationsFramework):
             if not skip(managed_flag):
                 assertFlag(managed_flag)('AdvManagedFlag on',
                     self.utils_replace_file.call_args[0][1])
+
+    def _pd_setup_agent_router(self):
+        router = prepare_router_data()
+        ri = l3router.RouterInfo(router['id'], router, **self.ri_kwargs)
+        agent = l3_agent.L3NATAgent(HOSTNAME, self.conf)
+        agent.external_gateway_added = mock.Mock()
+        agent.process_router(ri)
+        agent.pd.add_router(router['id'], ri.ns_name)
+        # Make sure radvd monitor is created
+        if not ri.radvd:
+            ri.radvd = ra.DaemonMonitor(router['id'],
+                                        ri.ns_name,
+                                        agent.process_monitor,
+                                        ri.get_internal_device_name)
+        return agent, router, ri
+
+    def _pd_remove_gw_interface(self, intfs, agent, router, ri,
+                              mock_internal_network_updated, expected_calls):
+        expected_pd_update = {}
+        for intf in intfs:
+            expected_calls += self._expected_call_lookup_ri_process_disabled(
+                                  ri, 'dibbler')
+            expected_pd_update[intf['subnet']['id']] = (
+                l3_constants.TEMP_PD_PREFIX)
+
+        self.pd_update = {}
+
+        def pd_notifier(context, prefix_update):
+            self.pd_update = prefix_update
+            for intf in intfs:
+                intf['subnet']['cidr'] = prefix_update[intf['subnet']['id']]
+
+        # Remove the interfaces
+        agent.pd.notifier = pd_notifier
+        agent.pd.remove_gw_interface(router['id'])
+
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+        self.assertEqual(expected_pd_update, self.pd_update)
+
+    def _pd_remove_interfaces(self, intfs, agent, router, ri,
+                              mock_internal_network_updated, expected_calls):
+        expected_pd_update = []
+        for intf in intfs:
+            router[l3_constants.INTERFACE_KEY].remove(intf)
+            expected_calls += self._expected_call_lookup_ri_process_disabled(
+                                  ri, 'dibbler')
+            expected_pd_update += [{intf['subnet']['id']:
+                l3_constants.TEMP_PD_PREFIX}]
+
+        self.pd_update = []
+
+        def pd_notifier(context, prefix_update):
+            self.pd_update.append(prefix_update)
+            for intf in intfs:
+                if intf['subnet']['id'] == prefix_update.keys()[0]:
+                    intf['subnet']['cidr'] = prefix_update.values()[0]
+                    break
+
+        # Remove the interfaces
+        agent.pd.notifier = pd_notifier
+        agent.process_router(ri)
+
+        # There is no ipv6 interface any more, and radvd will be killed because
+        # of that
+        expected_calls += self._expected_call_lookup_ri_process_disabled(
+                                  ri, 'radvd')
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+        self.assertEqual(expected_pd_update, self.pd_update)
+
+    def _pd_get_requestor_id(self, intf, router, ri):
+        ifname = ri.get_internal_device_name(intf['id'])
+        return pd.dibbler._get_requestor_id(router['id'],
+                             intf['subnet']['id'], ifname)
+
+    def _pd_get_prefixes(self, agent, router, ri,
+                         existing_intfs, new_intfs, mock_get_prefix,
+                         mock_internal_network_updated, expected_calls):
+        # First generate the prefixes that will be used for each interface
+        prefixes = {}
+        expected_pd_update = {}
+        for ifno, intf in enumerate(existing_intfs + new_intfs):
+            requestor_id = self._pd_get_requestor_id(intf, router, ri)
+            prefixes[requestor_id] = "2001:cafe:cafe:%d::/64" % ifno
+            if intf in new_intfs:
+                subnet_id = intf['subnet']['id']
+                expected_pd_update[subnet_id] = prefixes[requestor_id]
+
+        # Implement the prefix update notifier
+        # Keep track of the updated prefix
+        self.pd_update = {}
+        self.expected_calls = expected_calls
+
+        def pd_notifier(context, prefix_update):
+            self.pd_update = prefix_update
+            for subnet_id, prefix in prefix_update.iteritems():
+                for ifno, intf in enumerate(new_intfs):
+                    if intf['subnet']['id'] == subnet_id:
+                        # Update the prefix
+                        intf['subnet']['cidr'] = prefix
+                        requestor_id = self._pd_get_requestor_id(
+                            intf, router, ri)
+                        # The sequence of expected calls is the same as that
+                        # the pd_notifier is called.
+                        self.expected_calls += (
+                            self._expected_call_lookup_ri_process_enabled(
+                                ri, 'dibbler', requestor_id, False))
+                        break
+
+        # Start the dibbler client
+        agent.pd.notifier = pd_notifier
+        agent.pd.run_pd_client()
+
+        # Get the prefix and check that the neutron server is notified
+        def get_prefix(router_id, subnet_id, ifname):
+            key = '%s:%s:%s' % (router_id, subnet_id, ifname)
+            return prefixes[key]
+        mock_get_prefix.side_effect = get_prefix
+        agent.pd.run_pd_client()
+
+        # Make sure that the updated prefixes are expected
+        self.assertEqual(expected_pd_update, self.pd_update)
+        return expected_calls
+
+    def _pd_add_gw_interface(self, agent, router):
+        gw_ifname = agent.get_external_device_name(router['gw_port']['id'])
+        agent.pd.add_gw_interface(router['id'], gw_ifname)
+
+    @mock.patch.object(l3_agent.L3NATAgent, '_internal_network_updated')
+    @mock.patch.object(pd.dibbler, 'get_prefix')
+    @mock.patch.object(pd.dibbler.os, 'getpid', return_value=1234)
+    @mock.patch.object(pd.PrefixDelegation, '_ensure_lla', return_value=True)
+    @mock.patch.object(pd.dibbler.os, 'chmod')
+    @mock.patch.object(pd.dibbler.shutil, 'rmtree')
+    @mock.patch.object(pd.PrefixDelegation, '_get_sync_data')
+    def test_pd_dibbler(self, mock1, mock2, mock3, mock4,
+                        mock_getpid, mock_get_prefix,
+                        mock_internal_network_updated):
+        '''Add and remove one pd-enabled subnet
+        Remove the interface by deleting from the router
+        '''
+        # Initial setup
+        agent, router, ri = self._pd_setup_agent_router()
+
+        # Create one pd-enabled subnet and add router interface
+        intfs = router_append_pd_enabled_subnet(router)
+        agent.process_router(ri)
+
+        # No client should be started since there is no gateway port
+        self.assertFalse(self.external_process.call_count)
+        self.assertFalse(mock_get_prefix.call_count)
+
+        # Add the gateway interface
+        self._pd_add_gw_interface(agent, router)
+
+        # Get one prefix
+        expected_calls = self._pd_get_prefixes(agent, router, ri, [], intfs,
+            mock_get_prefix, mock_internal_network_updated, [])
+
+        # Update the router with the new prefix
+        agent.process_router(ri)
+        mock_internal_network_updated.assert_called_once_with(
+            ri, intfs[0], l3_constants.TEMP_PD_PREFIX)
+
+        # Check that radvd is started and the router port is configured
+        # with the new prefix
+        expected_calls += self._expected_call_lookup_ri_process_enabled(
+                                  ri, 'radvd', ri.router['id'], True)
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+
+        # Now remove the interface and check pd client and radvd are killed
+        self._pd_remove_interfaces(intfs, agent, router, ri,
+                              mock_internal_network_updated, expected_calls)
+        # No interface update since the router interface is removed
+        mock_internal_network_updated.assert_called_once_with(
+            ri, intfs[0], l3_constants.TEMP_PD_PREFIX)
+
+    @mock.patch.object(l3_agent.L3NATAgent, '_internal_network_updated')
+    @mock.patch.object(pd.dibbler, 'get_prefix')
+    @mock.patch.object(pd.dibbler.os, 'getpid', return_value=1234)
+    @mock.patch.object(pd.PrefixDelegation, '_ensure_lla', return_value=True)
+    @mock.patch.object(pd.dibbler.os, 'chmod')
+    @mock.patch.object(pd.dibbler.shutil, 'rmtree')
+    @mock.patch.object(pd.PrefixDelegation, '_get_sync_data')
+    def test_pd_dibbler1(self, mock1, mock2, mock3, mock4,
+                        mock_getpid, mock_get_prefix,
+                        mock_internal_network_updated):
+        '''Add one pd-enabled subnet and remove the gateway port
+        Remove the gateway port and check the prefix is removed
+        '''
+        # Initial setup
+        agent, router, ri = self._pd_setup_agent_router()
+
+        # Create one pd-enabled subnet and add router interface
+        intfs = router_append_pd_enabled_subnet(router)
+        agent.process_router(ri)
+
+        # Add the gateway interface
+        self._pd_add_gw_interface(agent, router)
+
+        # Get one prefix
+        expected_calls = self._pd_get_prefixes(agent, router, ri, [], intfs,
+            mock_get_prefix, mock_internal_network_updated, [])
+
+        # Update the router with the new prefix
+        agent.process_router(ri)
+        mock_internal_network_updated.assert_called_once_with(
+            ri, intfs[0], l3_constants.TEMP_PD_PREFIX)
+
+        # Check that radvd is started and the router port is configured
+        # with the new prefix
+        expected_calls += self._expected_call_lookup_ri_process_enabled(
+                                  ri, 'radvd', ri.router['id'], True)
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+
+        # Now remove the gw interface
+        prefix = intfs[0]['subnet']['cidr']
+        self._pd_remove_gw_interface(intfs, agent, router, ri,
+                              mock_internal_network_updated, expected_calls)
+
+        # There will a router update and therefore interface should be updated
+        agent.process_router(ri)
+        expected_call_args_list = (
+            [mock.call(ri, intfs[0], l3_constants.TEMP_PD_PREFIX),
+             mock.call(ri, intfs[0], prefix)])
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)
+
+    @mock.patch.object(l3_agent.L3NATAgent, '_internal_network_updated')
+    @mock.patch.object(pd.dibbler, 'get_prefix')
+    @mock.patch.object(pd.dibbler.os, 'getpid', return_value=1234)
+    @mock.patch.object(pd.PrefixDelegation, '_ensure_lla', return_value=True)
+    @mock.patch.object(pd.dibbler.os, 'chmod')
+    @mock.patch.object(pd.dibbler.shutil, 'rmtree')
+    @mock.patch.object(pd.PrefixDelegation, '_get_sync_data')
+    def test_pd_dibbler2(self, mock1, mock2, mock3, mock4,
+                        mock_getpid, mock_get_prefix,
+                        mock_internal_network_updated):
+        '''Add and remove two pd-enabled subnets
+        Remove the interfaces by deleting them from the router
+        '''
+        # Initial setup
+        agent, router, ri = self._pd_setup_agent_router()
+
+        # Create 2 pd-enabled subnets and add router interfaces
+        intfs = router_append_pd_enabled_subnet(router, count=2)
+        agent.process_router(ri)
+
+        # No client should be started
+        self.assertFalse(self.external_process.call_count)
+        self.assertFalse(mock_get_prefix.call_count)
+
+        # Add the gateway interface
+        self._pd_add_gw_interface(agent, router)
+
+        # Get prefixes
+        expected_calls = self._pd_get_prefixes(agent, router, ri, [], intfs,
+            mock_get_prefix, mock_internal_network_updated, [])
+
+        # Update the router with the new prefix
+        agent.process_router(ri)
+        expected_call_args_list = (
+            [mock.call(ri, intfs[0], l3_constants.TEMP_PD_PREFIX),
+             mock.call(ri, intfs[1], l3_constants.TEMP_PD_PREFIX)])
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)
+
+        # Check that radvd is started and the router port is configured
+        # with the new prefix
+        expected_calls += self._expected_call_lookup_ri_process_enabled(
+                                  ri, 'radvd', ri.router['id'], True)
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+
+        # Now remove the interface
+        self._pd_remove_interfaces(intfs, agent, router, ri,
+                              mock_internal_network_updated, expected_calls)
+        # No interface update since the router interfaces are removed
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)
+
+    @mock.patch.object(l3_agent.L3NATAgent, '_internal_network_updated')
+    @mock.patch.object(pd.dibbler, 'get_prefix')
+    @mock.patch.object(pd.dibbler.os, 'getpid', return_value=1234)
+    @mock.patch.object(pd.PrefixDelegation, '_ensure_lla', return_value=True)
+    @mock.patch.object(pd.dibbler.os, 'chmod')
+    @mock.patch.object(pd.dibbler.shutil, 'rmtree')
+    @mock.patch.object(pd.PrefixDelegation, '_get_sync_data')
+    def test_pd_dibbler3(self, mock1, mock2, mock3, mock4,
+                        mock_getpid, mock_get_prefix,
+                        mock_internal_network_updated):
+        '''Add one pd-enabled subnet, and add another one
+        Remove the interfaces by deleting them from the router
+        '''
+        # Initial setup
+        agent, router, ri = self._pd_setup_agent_router()
+
+        # Add the gateway interface
+        self._pd_add_gw_interface(agent, router)
+
+        # Create 1 pd-enabled subnet and add router interface
+        intfs = router_append_pd_enabled_subnet(router, count=1)
+        agent.process_router(ri)
+
+        # Get prefixes
+        expected_calls = self._pd_get_prefixes(agent, router, ri, [], intfs,
+            mock_get_prefix, mock_internal_network_updated, [])
+
+        # Update the router with the new prefix
+        agent.process_router(ri)
+
+        # the router port is configured with the new prefix
+        expected_call_args_list = (
+            [mock.call(ri, intfs[0], l3_constants.TEMP_PD_PREFIX)])
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)
+
+        # Check that radvd is started
+        expected_calls += self._expected_call_lookup_ri_process_enabled(
+                                  ri, 'radvd', ri.router['id'], True)
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+
+        # Now add another interface
+        # Create one pd-enabled subnet and add router interface
+        intfs1 = router_append_pd_enabled_subnet(router, count=1)
+        agent.process_router(ri)
+
+        # Get prefixes
+        expected_calls = self._pd_get_prefixes(agent, router, ri, intfs,
+            intfs1, mock_get_prefix, mock_internal_network_updated,
+            expected_calls)
+
+        # Update the router with the new prefix
+        agent.process_router(ri)
+        expected_call_args_list = (
+            [mock.call(ri, intfs[0], l3_constants.TEMP_PD_PREFIX),
+             mock.call(ri, intfs1[0], l3_constants.TEMP_PD_PREFIX)])
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)
+
+        # Check that radvd is notified for the new prefix
+        expected_calls += self._expected_call_lookup_ri_process_enabled(
+                                  ri, 'radvd', ri.router['id'], True)
+        self.assertEqual(expected_calls, self.external_process.mock_calls)
+
+        # Now remove the gw interface
+        prefix0 = intfs[0]['subnet']['cidr']
+        prefix1 = intfs1[0]['subnet']['cidr']
+        self._pd_remove_gw_interface(intfs + intfs1, agent, router, ri,
+                              mock_internal_network_updated, expected_calls)
+
+        agent.process_router(ri)
+        expected_call_args_list += [mock.call(ri, intfs[0], prefix0),
+                                   mock.call(ri, intfs1[0], prefix1)]
+        self.assertEqual(expected_call_args_list,
+                         mock_internal_network_updated.call_args_list)

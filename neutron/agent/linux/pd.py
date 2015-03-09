@@ -94,7 +94,7 @@ class PrefixDelegation(object):
                 del router['subnets'][subnet_id]
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
-            self.notifier.send_prefix_update(self.context, prefix_update)
+            self.notifier(self.context, prefix_update)
 
     @utils.synchronized("l3-agent-pd")
     def update_subnet(self, router_id, subnet_id, prefix):
@@ -133,7 +133,7 @@ class PrefixDelegation(object):
                     self._add_lla_address(router, pdo['bind_lla_with_mask'])
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
-            self.notifier.send_prefix_update(self.context, prefix_update)
+            self.notifier(self.context, prefix_update)
 
     def _delete_router_pd(self, router_id, router):
         prefix_update = {}
@@ -148,7 +148,7 @@ class PrefixDelegation(object):
                 prefix_update[subnet_id] = l3_constants.TEMP_PD_PREFIX
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
-            self.notifier.send_prefix_update(self.context, prefix_update)
+            self.notifier(self.context, prefix_update)
 
     @utils.synchronized("l3-agent-pd")
     def remove_gw_interface(self, router_id):
@@ -294,7 +294,7 @@ class PrefixDelegation(object):
 
         if prefix_update:
             LOG.debug("Update server with prefixes: %s", prefix_update)
-            self.notifier.send_prefix_update(self.context, prefix_update)
+            self.notifier(self.context, prefix_update)
 
     def after_start(self):
         LOG.debug('SIGHUP signal handler set')

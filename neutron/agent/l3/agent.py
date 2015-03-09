@@ -219,7 +219,8 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             self.event_observers.add(self.metadata_driver)
 
         self.pd = pd.PrefixDelegation(self.context, self.process_monitor,
-                                      self.driver, self.plugin_rpc,
+                                      self.driver,
+                                      self.plugin_rpc.send_prefix_update,
                                       self.create_pd_router_update)
 
     def _check_config_params(self):
@@ -459,7 +460,6 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
 
         new_ipv6_port = False
         old_ipv6_port = False
-        ipv6_pd_enabled = False
         for p in new_ports:
             if p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled):
                 interface_name = self.get_internal_device_name(p['id'])
@@ -471,11 +471,12 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
             ri.internal_ports.append(p)
             self._set_subnet_arp_info(ri, p)
             if (not new_ipv6_port and
-                    netaddr.IPNetwork(p['subnet']['cidr']).version == 6):
+                    netaddr.IPNetwork(p['subnet']['cidr']).version == 6 and
+                    p['subnet']['cidr'] != l3_constants.TEMP_PD_PREFIX):
                 new_ipv6_port = True
 
         for p in old_ports:
-            if p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled):
+            if p['subnet'].get('ipv6_pd_enabled', False):
                 self.pd.disable_subnet(ri.router['id'], p['subnet']['id'])
             self.internal_network_removed(ri, p)
             ri.internal_ports.remove(p)
@@ -484,7 +485,7 @@ class L3NATAgent(firewall_l3_agent.FWaaSL3AgentRpcCallback,
                 old_ipv6_port = True
 
         for p in update_ports:
-            if (p['subnet'].get('ipv6_pd_enabled', ipv6_pd_enabled)):
+            if (p['subnet'].get('ipv6_pd_enabled', False)):
                 old_prefix = self.pd.update_subnet(ri.router['id'],
                                                    p['subnet']['id'],
                                                    p['subnet']['cidr'])
