@@ -1609,6 +1609,24 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
                                                          port_mac))
         self.assertEqual(port['port']['fixed_ips'][0]['ip_address'], eui_addr)
 
+    def test_ip_allocation_for_ipv6_pd_subnet_slaac_address_mode(self):
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        v6_subnet = self._make_subnet(self.fmt, network,
+                                      gateway='::1',
+                                      cidr=constants.TEMP_PD_PREFIX,
+                                      ip_version=6,
+                                      ipv6_ra_mode=None,
+                                      ipv6_address_mode=constants.IPV6_SLAAC)
+        port = self._make_port(self.fmt, network['network']['id'])
+        self.assertEqual(len(port['port']['fixed_ips']), 1)
+        port_mac = port['port']['mac_address']
+        subnet_cidr = v6_subnet['subnet']['cidr']
+        eui_addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(subnet_cidr,
+                                                         port_mac))
+        self.assertEqual(port['port']['fixed_ips'][0]['ip_address'], eui_addr)
+
     def test_ip_allocation_for_ipv6_2_subnet_slaac_mode(self):
         res = self._create_network(fmt=self.fmt, name='net',
                                    admin_state_up=True)
@@ -1621,6 +1639,34 @@ fixed_ips=ip_address%%3D%s&fixed_ips=ip_address%%3D%s&fixed_ips=subnet_id%%3D%s
         v6_subnet_2 = self._make_subnet(self.fmt, network,
                                         gateway='2001:200::1',
                                         cidr='2001:200::0/64',
+                                        ip_version=6,
+                                        ipv6_ra_mode=constants.IPV6_SLAAC)
+        port = self._make_port(self.fmt, network['network']['id'])
+        self.assertEqual(len(port['port']['fixed_ips']), 2)
+        port_mac = port['port']['mac_address']
+        cidr_1 = v6_subnet_1['subnet']['cidr']
+        cidr_2 = v6_subnet_2['subnet']['cidr']
+        eui_addr_1 = str(ipv6_utils.get_ipv6_addr_by_EUI64(cidr_1,
+                                                           port_mac))
+        eui_addr_2 = str(ipv6_utils.get_ipv6_addr_by_EUI64(cidr_2,
+                                                           port_mac))
+        self.assertEqual(port['port']['fixed_ips'][0]['ip_address'],
+                         eui_addr_1)
+        self.assertEqual(port['port']['fixed_ips'][1]['ip_address'],
+                         eui_addr_2)
+
+    def test_ip_allocation_for_ipv6_pd_2_subnet_slaac_mode(self):
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        v6_subnet_1 = self._make_subnet(self.fmt, network,
+                                        gateway='::1',
+                                        cidr=constants.TEMP_PD_PREFIX,
+                                        ip_version=6,
+                                        ipv6_ra_mode=constants.IPV6_SLAAC)
+        v6_subnet_2 = self._make_subnet(self.fmt, network,
+                                        gateway='::1',
+                                        cidr=constants.TEMP_PD_PREFIX,
                                         ip_version=6,
                                         ipv6_ra_mode=constants.IPV6_SLAAC)
         port = self._make_port(self.fmt, network['network']['id'])
@@ -2490,6 +2536,14 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
         keys.setdefault('ip_version', 4)
         keys.setdefault('enable_dhcp', True)
         with self.subnet(network=network, **keys) as subnet:
+            # For PD Subnets, expect the ra and address mode to be either SLAAC
+            # or Stateless, even if other options are given. Therefore update
+            # keys afer subnet is created.
+            if keys['cidr'] == constants.TEMP_PD_PREFIX:
+                if keys.get('ipv6_ra_mode') != constants.DHCPV6_STATELESS:
+                    keys['ipv6_ra_mode'] = constants.IPV6_SLAAC
+                if keys.get('ipv6_address_mode') != constants.DHCPV6_STATELESS:
+                    keys['ipv6_address_mode'] = constants.IPV6_SLAAC
             # verify the response has each key with the correct value
             for k in keys:
                 self.assertIn(k, subnet['subnet'])
@@ -2821,6 +2875,36 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
         sport = self.deserialize(self.fmt, req.get_response(self.api))
         self.assertEqual(0, len(sport['port']['fixed_ips']))
 
+    def test_delete_subnet_ipv6_pd_slaac_port_exists(self):
+        """Test IPv6 PD SLAAC subnet delete when port is still using subnet."""
+        res = self._create_network(fmt=self.fmt, name='net',
+                                   admin_state_up=True)
+        network = self.deserialize(self.fmt, res)
+        # Create an IPv6 PD SLAAC subnet and a port using that subnet
+        subnet = self._make_subnet(self.fmt, network, gateway='::1',
+                                   cidr=constants.TEMP_PD_PREFIX, ip_version=6,
+                                   ipv6_ra_mode=constants.IPV6_SLAAC,
+                                   ipv6_address_mode=constants.IPV6_SLAAC)
+        res = self._create_port(self.fmt, net_id=network['network']['id'])
+        port = self.deserialize(self.fmt, res)
+        self.assertEqual(1, len(port['port']['fixed_ips']))
+
+        # The port should have an address from the subnet
+        req = self.new_show_request('ports', port['port']['id'], self.fmt)
+        res = req.get_response(self.api)
+        sport = self.deserialize(self.fmt, req.get_response(self.api))
+        self.assertEqual(1, len(sport['port']['fixed_ips']))
+
+        # Delete the subnet
+        req = self.new_delete_request('subnets', subnet['subnet']['id'])
+        res = req.get_response(self.api)
+        self.assertEqual(webob.exc.HTTPNoContent.code, res.status_int)
+        # The port should no longer have an address from the deleted subnet
+        req = self.new_show_request('ports', port['port']['id'], self.fmt)
+        res = req.get_response(self.api)
+        sport = self.deserialize(self.fmt, req.get_response(self.api))
+        self.assertEqual(0, len(sport['port']['fixed_ips']))
+
     def test_delete_network(self):
         gateway_ip = '10.0.0.1'
         cidr = '10.0.0.0/24'
@@ -3062,6 +3146,38 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
                                  ipv6_ra_mode=constants.IPV6_SLAAC,
                                  ipv6_address_mode=constants.IPV6_SLAAC)
 
+    def test_create_subnet_ipv6_pd_gw_values(self):
+        cidr = constants.TEMP_PD_PREFIX
+        # Gateway is last IP in IPv6 DHCPv6 Stateful subnet
+        gateway = '::ffff:ffff:ffff:fffe'
+        allocation_pools = [{'start': '::1',
+                             'end': '::ffff:ffff:ffff:fffd'}]
+        expected = {'gateway_ip': gateway,
+                    'cidr': cidr,
+                    'allocation_pools': allocation_pools}
+        self._test_create_subnet(expected=expected, gateway_ip=gateway,
+                                 cidr=cidr, ip_version=6,
+                                 ipv6_ra_mode=constants.DHCPV6_STATEFUL,
+                                 ipv6_address_mode=constants.DHCPV6_STATEFUL)
+        # Gateway is first IP in IPv6 DHCPv6 Stateful subnet
+        gateway = '::1'
+        allocation_pools = [{'start': '::2',
+                             'end': '::ffff:ffff:ffff:fffe'}]
+        expected = {'gateway_ip': gateway,
+                    'cidr': cidr,
+                    'allocation_pools': allocation_pools}
+        self._test_create_subnet(expected=expected, gateway_ip=gateway,
+                                 cidr=cidr, ip_version=6,
+                                 ipv6_ra_mode=constants.DHCPV6_STATEFUL,
+                                 ipv6_address_mode=constants.DHCPV6_STATEFUL)
+        # If gateway_ip is not specified, allocate first IP from the subnet
+        expected = {'gateway_ip': gateway,
+                    'cidr': cidr}
+        self._test_create_subnet(expected=expected,
+                                 cidr=cidr, ip_version=6,
+                                 ipv6_ra_mode=constants.IPV6_SLAAC,
+                                 ipv6_address_mode=constants.IPV6_SLAAC)
+
     def test_create_subnet_gw_outside_cidr_returns_400(self):
         with self.network() as network:
             self._create_subnet(self.fmt,
@@ -3152,6 +3268,15 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
         cidr = 'fe80::/80'
         allocation_pools = [{'start': 'fe80::2',
                              'end': 'fe80::ffff:fffa:ffff'}]
+        self._test_create_subnet(gateway_ip=gateway_ip,
+                                 cidr=cidr, ip_version=6,
+                                 allocation_pools=allocation_pools)
+
+    def test_create_subnet_with_v6_pd_allocation_pool(self):
+        gateway_ip = '::1'
+        cidr = constants.TEMP_PD_PREFIX
+        allocation_pools = [{'start': '::2',
+                             'end': '::ffff:ffff:ffff:fffe'}]
         self._test_create_subnet(gateway_ip=gateway_ip,
                                  cidr=cidr, ip_version=6,
                                  allocation_pools=allocation_pools)
@@ -3353,16 +3478,37 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
             self.assertRaises(n_exc.InvalidInput, plugin._validate_subnet,
                               ctx, new_subnet, cur_subnet)
 
+    def _test_validate_subnet_ipv6_pd_modes(self, cur_subnet=None,
+                                         expect_success=True, **modes):
+        plugin = manager.NeutronManager.get_plugin()
+        ctx = context.get_admin_context(load_admin_roles=False)
+        new_subnet = {'ip_version': 6,
+                      'cidr': constants.TEMP_PD_PREFIX,
+                      'enable_dhcp': True,
+                      'ipv6_address_mode': None,
+                      'ipv6_ra_mode': None}
+        for mode, value in modes.items():
+            new_subnet[mode] = value
+        if expect_success:
+            plugin._validate_subnet(ctx, new_subnet, cur_subnet)
+        else:
+            self.assertRaises(n_exc.InvalidInput, plugin._validate_subnet,
+                              ctx, new_subnet, cur_subnet)
+
     def test_create_subnet_ipv6_ra_modes(self):
         # Test all RA modes with no address mode specified
         for ra_mode in constants.IPV6_MODES:
             self._test_validate_subnet_ipv6_modes(
+                ipv6_ra_mode=ra_mode)
+            self._test_validate_subnet_ipv6_pd_modes(
                 ipv6_ra_mode=ra_mode)
 
     def test_create_subnet_ipv6_addr_modes(self):
         # Test all address modes with no RA mode specified
         for addr_mode in constants.IPV6_MODES:
             self._test_validate_subnet_ipv6_modes(
+                ipv6_address_mode=addr_mode)
+            self._test_validate_subnet_ipv6_pd_modes(
                 ipv6_address_mode=addr_mode)
 
     def test_create_subnet_ipv6_same_ra_and_addr_modes(self):
@@ -3371,12 +3517,19 @@ class TestSubnetsV2(NeutronDbPluginV2TestCase):
             self._test_validate_subnet_ipv6_modes(
                 ipv6_ra_mode=ipv6_mode,
                 ipv6_address_mode=ipv6_mode)
+            self._test_validate_subnet_ipv6_pd_modes(
+                ipv6_ra_mode=ipv6_mode,
+                ipv6_address_mode=ipv6_mode)
 
     def test_create_subnet_ipv6_different_ra_and_addr_modes(self):
         # Test all ipv6 modes with ra_mode!=addr_mode
         for ra_mode, addr_mode in itertools.permutations(
                 constants.IPV6_MODES, 2):
             self._test_validate_subnet_ipv6_modes(
+                expect_success=not (ra_mode and addr_mode),
+                ipv6_ra_mode=ra_mode,
+                ipv6_address_mode=addr_mode)
+            self._test_validate_subnet_ipv6_pd_modes(
                 expect_success=not (ra_mode and addr_mode),
                 ipv6_ra_mode=ra_mode,
                 ipv6_address_mode=addr_mode)
@@ -4324,6 +4477,36 @@ class TestNeutronDbPluginV2(base.BaseTestCase):
                 'cidr': u'2001:200::/64',
                 'enable_dhcp': True,
                 'gateway_ip': u'2001:200::1',
+                'id': u'dc813d3d-ed66-4184-8570-7325c8195e28',
+                'ip_version': 6,
+                'ipv6_address_mode': None,
+                'ipv6_ra_mode': u'slaac'}]
+        port = {'port': {
+            'network_id': 'fbb9b578-95eb-4b79-a116-78e5c4927176',
+            'fixed_ips': attributes.ATTR_NOT_SPECIFIED,
+            'mac_address': '12:34:56:78:44:ab'}}
+        expected = []
+        for subnet in subnets:
+            addr = str(ipv6_utils.get_ipv6_addr_by_EUI64(
+                            subnet['cidr'], port['port']['mac_address']))
+            expected.append({'ip_address': addr, 'subnet_id': subnet['id']})
+
+        self._test__allocate_ips_for_port(subnets, port, expected)
+
+    def test__allocate_ips_for_port_2_slaac_pd_subnets(self):
+        subnets = [
+            {
+                'cidr': constants.TEMP_PD_PREFIX,
+                'enable_dhcp': True,
+                'gateway_ip': u'::1',
+                'id': u'd1a28edd-bd83-480a-bd40-93d036c89f13',
+                'ip_version': 6,
+                'ipv6_address_mode': None,
+                'ipv6_ra_mode': u'slaac'},
+            {
+                'cidr': constants.TEMP_PD_PREFIX,
+                'enable_dhcp': True,
+                'gateway_ip': u'::1',
                 'id': u'dc813d3d-ed66-4184-8570-7325c8195e28',
                 'ip_version': 6,
                 'ipv6_address_mode': None,

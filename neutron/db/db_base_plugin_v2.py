@@ -1056,10 +1056,10 @@ class NeutronDbPluginV2(neutron_plugin_base_v2.NeutronPluginBaseV2,
             s['ip_version'] = 6
             # Make sure RA and Address modes are SLAAC,
             # unless stateless has been set
-            if not s['ipv6_ra_mode'] == 'stateless':
-                s['ipv6_ra_mode'] = 'slaac'
-            if not s['ipv6_address_mode'] == 'stateless':
-                s['ipv6_address_mode'] = 'slaac'
+            if not s['ipv6_ra_mode'] == constants.DHCPV6_STATELESS:
+                s['ipv6_ra_mode'] = constants.IPV6_SLAAC
+            if not s['ipv6_address_mode'] == constants.DHCPV6_STATELESS:
+                s['ipv6_address_mode'] = constants.IPV6_SLAAC
 
         if s['ip_version'] is None:
             s['ip_version'] = 4
