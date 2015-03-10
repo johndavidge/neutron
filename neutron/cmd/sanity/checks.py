@@ -162,13 +162,10 @@ def get_minimal_dibbler_version_supported():
 def dibbler_version_supported():
     try:
         cmd = ['dibbler-client',
-               'run',
-               '-w',
-               'fake_working_directory']
-        env = {'LC_ALL': 'C'}
-        out = agent_utils.execute(cmd, addl_env=env)
-        m = re.search(r"invalid option", out)
-        if m not None:
+               'help']
+        out = agent_utils.execute(cmd)
+        m = re.search('-w', out)
+        if m is None:
             return False
     except (OSError, RuntimeError, IndexError, ValueError) as e:
         LOG.debug("Exception while checking minimal dibbler version. "
