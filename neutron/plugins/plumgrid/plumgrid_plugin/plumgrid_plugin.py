@@ -781,9 +781,11 @@ class NeutronPluginPLUMgridV2(db_base_plugin_v2.NeutronDbPluginV2,
         """
 
         pools = []
+        ip_version = subnet['ip_version']
         # Auto allocate the pool around gateway_ip
         net = netaddr.IPNetwork(subnet['cidr'])
-        boundary = int(netaddr.IPAddress(subnet['gateway_ip'] or net.last))
+        boundary = int(netaddr.IPAddress(subnet['gateway_ip'] or net.last,
+                                         ip_version))
         potential_dhcp_ip = int(net.first + 1)
         if boundary == potential_dhcp_ip:
             first_ip = net.first + 3
@@ -795,11 +797,15 @@ class NeutronPluginPLUMgridV2(db_base_plugin_v2.NeutronDbPluginV2,
         # for this subnet
         split_ip = min(max(boundary, net.first), net.last)
         if split_ip > first_ip:
-            pools.append({'start': str(netaddr.IPAddress(first_ip)),
-                          'end': str(netaddr.IPAddress(split_ip - 1))})
+            pools.append({'start': str(netaddr.IPAddress(first_ip,
+                                                         ip_version)),
+                          'end': str(netaddr.IPAddress(split_ip - 1,
+                                                       ip_version))})
         if split_ip < last_ip:
-            pools.append({'start': str(netaddr.IPAddress(split_ip + 1)),
-                          'end': str(netaddr.IPAddress(last_ip))})
+            pools.append({'start': str(netaddr.IPAddress(split_ip + 1,
+                                                         ip_version)),
+                          'end': str(netaddr.IPAddress(last_ip,
+                                                       ip_version))})
             # return auto-generated pools
         # no need to check for their validity
         return pools
