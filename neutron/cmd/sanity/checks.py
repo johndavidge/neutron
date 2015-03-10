@@ -32,6 +32,7 @@ LOG = logging.getLogger(__name__)
 
 
 MINIMUM_DNSMASQ_VERSION = 2.67
+MINIMUM_DIBBLER_VERSION = '1.0.1'
 
 
 def ovs_vxlan_supported(from_ip='192.0.2.1', to_ip='192.0.2.2'):
@@ -149,6 +150,28 @@ def dnsmasq_version_supported():
             return False
     except (OSError, RuntimeError, IndexError, ValueError) as e:
         LOG.debug("Exception while checking minimal dnsmasq version. "
+                  "Exception: %s", e)
+        return False
+    return True
+
+
+def get_minimal_dibbler_version_supported():
+    return MINIMUM_DIBBLER_VERSION
+
+
+def dibbler_version_supported():
+    try:
+        cmd = ['dibbler-client',
+               'run',
+               '-w',
+               'fake_working_directory']
+        env = {'LC_ALL': 'C'}
+        out = agent_utils.execute(cmd, addl_env=env)
+        m = re.search(r"invalid option", out)
+        if m not None:
+            return False
+    except (OSError, RuntimeError, IndexError, ValueError) as e:
+        LOG.debug("Exception while checking minimal dibbler version. "
                   "Exception: %s", e)
         return False
     return True
