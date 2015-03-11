@@ -26,6 +26,8 @@ from webob import exc
 from neutron.api.rpc.agentnotifiers import l3_rpc_agent_api
 from neutron.api.rpc.handlers import l3_rpc
 from neutron.api.v2 import attributes
+from neutron.callbacks import exceptions
+from neutron.callbacks import registry
 from neutron.common import constants as l3_constants
 from neutron.common import exceptions as n_exc
 from neutron import context
@@ -1352,6 +1354,57 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                                               s['subnet']['id'],
                                               None)
 
+    def test_router_remove_interface_callback_failure_returns_409(self):
+        with contextlib.nested(
+            self.router(),
+            self.subnet(),
+            mock.patch.object(registry, 'notify')) as (r, s, notify):
+                errors = [
+                    exceptions.NotificationError(
+                        'foo_callback_id', n_exc.InUse()),
+                ]
+                # we fail the first time, but not the second, when
+                # the clean-up takes place
+                notify.side_effect = [
+                    exceptions.CallbackFailure(errors=errors), None
+                ]
+                self._router_interface_action('add',
+                                              r['router']['id'],
+                                              s['subnet']['id'],
+                                              None)
+                self._router_interface_action(
+                    'remove',
+                    r['router']['id'],
+                    s['subnet']['id'],
+                    None,
+                    exc.HTTPConflict.code)
+                # remove properly to clean-up
+                self._router_interface_action(
+                    'remove',
+                    r['router']['id'],
+                    s['subnet']['id'],
+                    None)
+
+    def test_router_clear_gateway_callback_failure_returns_409(self):
+        with contextlib.nested(
+            self.router(),
+            self.subnet(),
+            mock.patch.object(registry, 'notify')) as (r, s, notify):
+                errors = [
+                    exceptions.NotificationError(
+                        'foo_callback_id', n_exc.InUse()),
+                ]
+                notify.side_effect = exceptions.CallbackFailure(errors=errors)
+                self._set_net_external(s['subnet']['network_id'])
+                self._add_external_gateway_to_router(
+                       r['router']['id'],
+                       s['subnet']['network_id'])
+                self._remove_external_gateway_from_router(
+                    r['router']['id'],
+                    s['subnet']['network_id'],
+                    external_gw_info={},
+                    expected_code=exc.HTTPConflict.code)
+
     def test_router_remove_interface_wrong_subnet_returns_400(self):
         with self.router() as r:
             with self.subnet() as s:
@@ -1970,21 +2023,41 @@ class L3NatTestCaseBase(L3NatTestCaseMixin):
                     break
         self.assertTrue(found)
 
+    def _test_router_delete_subnet_inuse_returns_409(self, router, subnet):
+        r, s = router, subnet
+        self._router_interface_action('add',
+                                      r['router']['id'],
+                                      s['subnet']['id'],
+                                      None)
+        # subnet cannot be deleted as it's attached to a router
+        self._delete('subnets', s['subnet']['id'],
+                     expected_code=exc.HTTPConflict.code)
+        # remove interface so test can exit without errors
+        self._router_interface_action('remove',
+                                      r['router']['id'],
+                                      s['subnet']['id'],
+                                      None)
+
+    def _ipv6_subnet(self, mode):
+        return self.subnet(cidr='fd00::1/64', gateway_ip='fd00::1',
+                           ip_version=6,
+                           ipv6_ra_mode=mode,
+                           ipv6_address_mode=mode)
+
     def test_router_delete_subnet_inuse_returns_409(self):
         with self.router() as r:
             with self.subnet() as s:
-                self._router_interface_action('add',
-                                              r['router']['id'],
-                                              s['subnet']['id'],
-                                              None)
-                # subnet cannot be delete as it's attached to a router
-                self._delete('subnets', s['subnet']['id'],
-                             expected_code=exc.HTTPConflict.code)
-                # remove interface so test can exit without errors
-                self._router_interface_action('remove',
-                                              r['router']['id'],
-                                              s['subnet']['id'],
-                                              None)
+                self._test_router_delete_subnet_inuse_returns_409(r, s)
+
+    def test_router_delete_ipv6_slaac_subnet_inuse_returns_409(self):
+        with self.router() as r:
+            with self._ipv6_subnet(l3_constants.IPV6_SLAAC) as s:
+                self._test_router_delete_subnet_inuse_returns_409(r, s)
+
+    def test_router_delete_dhcpv6_stateless_subnet_inuse_returns_409(self):
+        with self.router() as r:
+            with self._ipv6_subnet(l3_constants.DHCPV6_STATELESS) as s:
+                self._test_router_delete_subnet_inuse_returns_409(r, s)
 
     def test_delete_ext_net_with_disassociated_floating_ips(self):
         with self.network() as net:

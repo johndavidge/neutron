@@ -17,6 +17,7 @@ import netaddr
 import weakref
 
 from neutron.agent.l3 import dvr_fip_ns
+from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.linux import ip_lib
 from neutron.agent.linux import iptables_manager
 from neutron.common import constants as l3_constants
@@ -25,8 +26,9 @@ from neutron.openstack.common import log as logging
 
 LOG = logging.getLogger(__name__)
 
-SNAT_INT_DEV_PREFIX = 'sg-'
-SNAT_NS_PREFIX = 'snat-'
+# TODO(Carl) Following constants retained to increase SNR during refactoring
+SNAT_INT_DEV_PREFIX = dvr_snat_ns.SNAT_INT_DEV_PREFIX
+SNAT_NS_PREFIX = dvr_snat_ns.SNAT_NS_PREFIX
 # xor-folding mask used for IPv6 rule index
 MASK_30 = 0x3fffffff
 
@@ -54,54 +56,19 @@ class AgentMixin(object):
 
         return fip_ns
 
-    def _destroy_snat_namespace(self, ns):
-        ns_ip = ip_lib.IPWrapper(namespace=ns)
-        # delete internal interfaces
-        for d in ns_ip.get_devices(exclude_loopback=True):
-            if d.name.startswith(SNAT_INT_DEV_PREFIX):
-                LOG.debug('Unplugging DVR device %s', d.name)
-                self.driver.unplug(d.name, namespace=ns,
-                                   prefix=SNAT_INT_DEV_PREFIX)
-
-        # TODO(mrsmith): delete ext-gw-port
-        LOG.debug('DVR: destroy snat ns: %s', ns)
-        if self.conf.router_delete_namespaces:
-            self._delete_namespace(ns_ip, ns)
-
     def _destroy_fip_namespace(self, ns):
         ex_net_id = ns[len(dvr_fip_ns.FIP_NS_PREFIX):]
         fip_ns = self.get_fip_ns(ex_net_id)
-        fip_ns.destroy()
+        fip_ns.delete()
 
-    def _set_subnet_arp_info(self, ri, port):
-        """Set ARP info retrieved from Plugin for existing ports."""
-        if 'id' not in port['subnet'] or not ri.router['distributed']:
-            return
-        subnet_id = port['subnet']['id']
-        subnet_ports = (
-            self.plugin_rpc.get_ports_by_subnet(self.context,
-                                                subnet_id))
-
-        for p in subnet_ports:
-            if p['device_owner'] not in l3_constants.ROUTER_INTERFACE_OWNERS:
-                for fixed_ip in p['fixed_ips']:
-                    self._update_arp_entry(ri, fixed_ip['ip_address'],
-                                           p['mac_address'],
-                                           subnet_id, 'add')
-
-    def get_internal_port(self, ri, subnet_id):
-        """Return internal router port based on subnet_id."""
-        router_ports = ri.router.get(l3_constants.INTERFACE_KEY, [])
-        for port in router_ports:
-            fips = port['fixed_ips']
-            for f in fips:
-                if f['subnet_id'] == subnet_id:
-                    return port
+    def get_ports_by_subnet(self, subnet_id):
+        return self.plugin_rpc.get_ports_by_subnet(self.context, subnet_id)
 
     def get_snat_int_device_name(self, port_id):
         return (SNAT_INT_DEV_PREFIX +
                 port_id)[:self.driver.DEV_NAME_LEN]
 
+    # TODO(Carl) Remove this method when vpnaas no longer needs it.
     def get_snat_ns_name(self, router_id):
         return (SNAT_NS_PREFIX + router_id)
 
@@ -150,21 +117,20 @@ class AgentMixin(object):
     def _create_dvr_gateway(self, ri, ex_gw_port, gw_interface_name,
                             snat_ports):
         """Create SNAT namespace."""
-        snat_ns_name = self.get_snat_ns_name(ri.router['id'])
-        self._create_namespace(snat_ns_name)
+        snat_ns = ri.create_snat_namespace()
         # connect snat_ports to br_int from SNAT namespace
         for port in snat_ports:
             # create interface_name
             self._set_subnet_info(port)
             interface_name = self.get_snat_int_device_name(port['id'])
-            self._internal_network_added(snat_ns_name, port['network_id'],
+            self._internal_network_added(snat_ns.name, port['network_id'],
                                          port['id'], port['ip_cidr'],
                                          port['mac_address'], interface_name,
                                          SNAT_INT_DEV_PREFIX)
         self._external_gateway_added(ri, ex_gw_port, gw_interface_name,
-                                     snat_ns_name, preserve_ips=[])
+                                     snat_ns.name, preserve_ips=[])
         ri.snat_iptables_manager = iptables_manager.IptablesManager(
-            namespace=snat_ns_name,
+            namespace=snat_ns.name,
             use_ipv6=self.use_ipv6)
         # kicks the FW Agent to add rules for the snat namespace
         self.process_router_add(ri)
@@ -195,43 +161,28 @@ class AgentMixin(object):
         except Exception:
             LOG.exception(_LE('DVR: removed snat failed'))
 
-    def _update_arp_entry(self, ri, ip, mac, subnet_id, operation):
-        """Add or delete arp entry into router namespace for the subnet."""
-        port = self.get_internal_port(ri, subnet_id)
-        # update arp entry only if the subnet is attached to the router
-        if port:
-            ip_cidr = str(ip) + '/32'
-            try:
-                # TODO(mrsmith): optimize the calls below for bulk calls
-                net = netaddr.IPNetwork(ip_cidr)
-                interface_name = self.get_internal_device_name(port['id'])
-                device = ip_lib.IPDevice(interface_name, namespace=ri.ns_name)
-                if operation == 'add':
-                    device.neigh.add(net.version, ip, mac)
-                elif operation == 'delete':
-                    device.neigh.delete(net.version, ip, mac)
-            except Exception:
-                LOG.exception(_LE("DVR: Failed updating arp entry"))
-                self.fullsync = True
-
     def add_arp_entry(self, context, payload):
         """Add arp entry into router namespace.  Called from RPC."""
-        arp_table = payload['arp_table']
         router_id = payload['router_id']
+        ri = self.router_info.get(router_id)
+        if not ri:
+            return
+
+        arp_table = payload['arp_table']
         ip = arp_table['ip_address']
         mac = arp_table['mac_address']
         subnet_id = arp_table['subnet_id']
-        ri = self.router_info.get(router_id)
-        if ri:
-            self._update_arp_entry(ri, ip, mac, subnet_id, 'add')
+        ri._update_arp_entry(ip, mac, subnet_id, 'add')
 
     def del_arp_entry(self, context, payload):
         """Delete arp entry from router namespace.  Called from RPC."""
-        arp_table = payload['arp_table']
         router_id = payload['router_id']
+        ri = self.router_info.get(router_id)
+        if not ri:
+            return
+
+        arp_table = payload['arp_table']
         ip = arp_table['ip_address']
         mac = arp_table['mac_address']
         subnet_id = arp_table['subnet_id']
-        ri = self.router_info.get(router_id)
-        if ri:
-            self._update_arp_entry(ri, ip, mac, subnet_id, 'delete')
+        ri._update_arp_entry(ip, mac, subnet_id, 'delete')

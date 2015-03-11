@@ -12,17 +12,26 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+import netaddr
+from oslo_utils import excutils
+
 from neutron.agent.l3 import dvr_fip_ns
+from neutron.agent.l3 import dvr_snat_ns
 from neutron.agent.l3 import router_info as router
 from neutron.agent.linux import ip_lib
 from neutron.common import constants as l3_constants
 from neutron.common import utils as common_utils
+from neutron.i18n import _LE
+from neutron.openstack.common import log as logging
+
+LOG = logging.getLogger(__name__)
 
 
 class DvrRouter(router.RouterInfo):
-    def __init__(self, host, *args, **kwargs):
+    def __init__(self, agent, host, *args, **kwargs):
         super(DvrRouter, self).__init__(*args, **kwargs)
 
+        self.agent = agent
         self.host = host
 
         self.floating_ips_dict = {}
@@ -30,6 +39,7 @@ class DvrRouter(router.RouterInfo):
         # Linklocal subnet for router and floating IP namespace link
         self.rtr_fip_subnet = None
         self.dist_fip_count = None
+        self.snat_namespace = None
 
     def get_floating_ips(self):
         """Filter Floating IPs to be hosted on this agent."""
@@ -121,7 +131,7 @@ class DvrRouter(router.RouterInfo):
                 # destroying it.  The two could end up conflicting on
                 # creating/destroying interfaces and such.  I think I'd like a
                 # semaphore to sync creation/deletion of this namespace.
-                self.fip_ns.destroy()
+                self.fip_ns.delete()
                 self.fip_ns = None
 
     def add_floating_ip(self, fip, interface_name, device):
@@ -137,3 +147,70 @@ class DvrRouter(router.RouterInfo):
     def remove_floating_ip(self, device, ip_cidr):
         super(DvrRouter, self).remove_floating_ip(device, ip_cidr)
         self.floating_ip_removed_dist(ip_cidr)
+
+    def create_snat_namespace(self):
+        # TODO(mlavalle): in the near future, this method should contain the
+        # code in the L3 agent that creates a gateway for a dvr. The first step
+        # is to move the creation of the snat namespace here
+        self.snat_namespace = dvr_snat_ns.SnatNamespace(self.router['id'],
+                                                        self.agent_conf,
+                                                        self.driver,
+                                                        self.use_ipv6)
+        self.snat_namespace.create()
+        return self.snat_namespace
+
+    def delete_snat_namespace(self):
+        # TODO(mlavalle): in the near future, this method should contain the
+        # code in the L3 agent that removes an external gateway for a dvr. The
+        # first step is to move the deletion of the snat namespace here
+        self.snat_namespace.delete()
+        self.snat_namespace = None
+
+    def _get_internal_port(self, subnet_id):
+        """Return internal router port based on subnet_id."""
+        router_ports = self.router.get(l3_constants.INTERFACE_KEY, [])
+        for port in router_ports:
+            fips = port['fixed_ips']
+            for f in fips:
+                if f['subnet_id'] == subnet_id:
+                    return port
+
+    def _update_arp_entry(self, ip, mac, subnet_id, operation):
+        """Add or delete arp entry into router namespace for the subnet."""
+        port = self._get_internal_port(subnet_id)
+        # update arp entry only if the subnet is attached to the router
+        if not port:
+            return
+
+        ip_cidr = str(ip) + '/32'
+        try:
+            # TODO(mrsmith): optimize the calls below for bulk calls
+            net = netaddr.IPNetwork(ip_cidr)
+            interface_name = self.get_internal_device_name(port['id'])
+            device = ip_lib.IPDevice(interface_name, namespace=self.ns_name)
+            if operation == 'add':
+                device.neigh.add(net.version, ip, mac)
+            elif operation == 'delete':
+                device.neigh.delete(net.version, ip, mac)
+        except Exception:
+            with excutils.save_and_reraise_exception():
+                LOG.exception(_LE("DVR: Failed updating arp entry"))
+
+    def _set_subnet_arp_info(self, port):
+        """Set ARP info retrieved from Plugin for existing ports."""
+        if 'id' not in port['subnet']:
+            return
+
+        subnet_id = port['subnet']['id']
+
+        # TODO(Carl) Can we eliminate the need to make this RPC while
+        # processing a router.
+        subnet_ports = self.agent.get_ports_by_subnet(subnet_id)
+
+        for p in subnet_ports:
+            if p['device_owner'] not in l3_constants.ROUTER_INTERFACE_OWNERS:
+                for fixed_ip in p['fixed_ips']:
+                    self._update_arp_entry(fixed_ip['ip_address'],
+                                           p['mac_address'],
+                                           subnet_id,
+                                           'add')

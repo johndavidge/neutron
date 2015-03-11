@@ -557,15 +557,13 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
 
     def _process_manager_constructor_call(self):
         return mock.call(conf=cfg.CONF,
-                        uuid=FAKE_NETWORK_UUID,
-                        namespace=FAKE_NETWORK_DHCP_NS,
-                        service=None,
-                        default_cmd_callback=mock.ANY,
-                        pid_file=None,
-                        cmd_addl_env=None)
+                         uuid=FAKE_NETWORK_UUID,
+                         namespace=FAKE_NETWORK_DHCP_NS,
+                         default_cmd_callback=mock.ANY)
 
     def _enable_dhcp_helper(self, network, enable_isolated_metadata=False,
                             is_isolated_network=False):
+        self.dhcp._process_monitor = mock.Mock()
         if enable_isolated_metadata:
             cfg.CONF.set_override('enable_isolated_metadata', True)
         self.plugin.get_network_info.return_value = network
@@ -577,7 +575,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         if is_isolated_network:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
-                mock.call().enable(reload_cfg=False)
+                mock.call().enable()
             ])
         else:
             self.assertFalse(self.external_process.call_count)
@@ -700,7 +698,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         if isolated_metadata:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
-                mock.call().disable(cmd_callback=None)])
+                mock.call().disable()])
         else:
             self.assertFalse(self.external_process.call_count)
 
@@ -732,7 +730,7 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         if isolated_metadata:
             self.external_process.assert_has_calls([
                 self._process_manager_constructor_call(),
-                mock.call().disable(cmd_callback=None)
+                mock.call().disable()
             ])
         else:
             self.assertFalse(self.external_process.call_count)
@@ -744,41 +742,37 @@ class TestDhcpAgentEventHandler(base.BaseTestCase):
         self._disable_dhcp_helper_driver_failure()
 
     def test_enable_isolated_metadata_proxy(self):
+        self.dhcp._process_monitor = mock.Mock()
         self.dhcp.enable_isolated_metadata_proxy(fake_network)
         self.external_process.assert_has_calls([
             self._process_manager_constructor_call(),
-            mock.call().enable(reload_cfg=False)
+            mock.call().enable()
         ])
 
     def test_disable_isolated_metadata_proxy(self):
-        self.dhcp.disable_isolated_metadata_proxy(fake_network)
-        self.external_process.assert_has_calls([
-            self._process_manager_constructor_call(),
-            mock.call().disable(cmd_callback=None)
-        ])
+        method_path = ('neutron.agent.metadata.driver.MetadataDriver'
+                       '.destroy_monitored_metadata_proxy')
+        with mock.patch(method_path) as destroy:
+            self.dhcp.disable_isolated_metadata_proxy(fake_network)
+            destroy.assert_called_once_with(self.dhcp._process_monitor,
+                                            fake_network.id,
+                                            fake_network.namespace,
+                                            cfg.CONF)
 
     def _test_metadata_network(self, network):
         cfg.CONF.set_override('enable_metadata_network', True)
         cfg.CONF.set_override('debug', True)
         cfg.CONF.set_override('verbose', False)
         cfg.CONF.set_override('log_file', 'test.log')
-        self.dhcp.enable_isolated_metadata_proxy(network)
-
-        self.external_process.assert_has_calls([
-            self._process_manager_constructor_call()])
-
-        callback = self.external_process.call_args[1]['default_cmd_callback']
-        result_cmd = callback('pidfile')
-        self.assertEqual(
-            result_cmd,
-            ['neutron-ns-metadata-proxy',
-             '--pid_file=pidfile',
-             '--metadata_proxy_socket=%s' % cfg.CONF.metadata_proxy_socket,
-             '--router_id=forzanapoli',
-             '--state_path=%s' % cfg.CONF.state_path,
-             '--metadata_port=%d' % dhcp.METADATA_PORT,
-             '--debug',
-             '--log-file=neutron-ns-metadata-proxy-%s.log' % network.id])
+        method_path = ('neutron.agent.metadata.driver.MetadataDriver'
+                       '.spawn_monitored_metadata_proxy')
+        with mock.patch(method_path) as spawn:
+            self.dhcp.enable_isolated_metadata_proxy(network)
+            spawn.assert_called_once_with(self.dhcp._process_monitor,
+                                          network.namespace,
+                                          dhcp.METADATA_PORT,
+                                          cfg.CONF,
+                                          router_id='forzanapoli')
 
     def test_enable_isolated_metadata_proxy_with_metadata_network(self):
         self._test_metadata_network(fake_meta_network)

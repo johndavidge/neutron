@@ -147,6 +147,16 @@ class DNSNameServersExhausted(BadRequest):
                 "The number of DNS nameservers exceeds the limit %(quota)s.")
 
 
+class InvalidIpForNetwork(BadRequest):
+    message = _("IP address %(ip_address)s is not a valid IP "
+                "for any of the subnets on the specified network.")
+
+
+class InvalidIpForSubnet(BadRequest):
+    message = _("IP address %(ip_address)s is not a valid IP "
+                "for the specified subnet.")
+
+
 class IpAddressInUse(InUse):
     message = _("Unable to complete operation for network %(net_id)s. "
                 "The IP address %(ip_address)s is in use.")
@@ -367,6 +377,14 @@ class IpTablesApplyException(NeutronException):
     def __init__(self, message=None):
         self.message = message
         super(IpTablesApplyException, self).__init__()
+
+
+class NetworkIdOrRouterIdRequiredError(NeutronException):
+    message = _('network_id and router_id are None. One must be provided.')
+
+
+class AbortSyncRouters(NeutronException):
+    message = _("Aborting periodic_sync_routers_task due to an error")
 
 
 # Shared *aas exceptions, pending them being refactored out of Neutron

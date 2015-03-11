@@ -19,7 +19,6 @@ import sqlalchemy as sa
 from sqlalchemy import func
 from sqlalchemy import or_
 from sqlalchemy import orm
-from sqlalchemy.orm import exc
 from sqlalchemy.orm import joinedload
 from sqlalchemy import sql
 
@@ -232,12 +231,7 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
             query = query.filter(
                 RouterL3AgentBinding.router_id == router_id,
                 RouterL3AgentBinding.l3_agent_id == agent_id)
-            try:
-                binding = query.one()
-            except exc.NoResultFound:
-                raise l3agentscheduler.RouterNotHostedByL3Agent(
-                    router_id=router_id, agent_id=agent_id)
-            context.session.delete(binding)
+            query.delete()
 
     def reschedule_router(self, context, router_id, candidates=None):
         """Reschedule router to a new l3 agent
@@ -366,6 +360,8 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
             for key, value in filters.iteritems():
                 column = getattr(agents_db.Agent, key, None)
                 if column:
+                    if not value:
+                        return []
                     query = query.filter(column.in_(value))
 
             agent_modes = filters.get('agent_modes', [])
@@ -487,6 +483,8 @@ class L3AgentSchedulerDbMixin(l3agentscheduler.L3AgentSchedulerPluginBase,
 
     def get_l3_agent_with_min_routers(self, context, agent_ids):
         """Return l3 agent with the least number of routers."""
+        if not agent_ids:
+            return None
         query = context.session.query(
             agents_db.Agent,
             func.count(

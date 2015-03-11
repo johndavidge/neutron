@@ -35,6 +35,9 @@ kill_dibbler-client: KillFilter, root, /local/sbin/dibbler-client, -9, -HUP
 ip: IpFilter, ip, root
 ip_exec: IpNetnsExecFilter, ip, root
 
+# For ip monitor
+kill_ip_monitor: KillFilter, root, ip, -9
+
 # ovs_lib (if OVSInterfaceDriver is used)
 ovs-vsctl: CommandFilter, ovs-vsctl, root
 

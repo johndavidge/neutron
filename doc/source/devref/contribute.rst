@@ -370,19 +370,22 @@ Decomposition progress chart
 
 The following chart captures the following aspects:
 
-* Name: the name of the project that implements a Neutron plugin or driver.
+* Name: the name of the project that implements a Neutron plugin or driver. The
+  name is an internal target for links that point to source code, etc.
 * Plugins/Drivers: whether the source code contains a core (aka monolithic)
   plugin, a set of ML2 drivers, and/or (service) plugins (or extensions) for
   firewall, vpn, and load balancers.
-* Git Repository: a link to the publicly available source code.
-* Launchpad: a link to the Launchpad project, for managing bugs and blueprints.
-* PyPI: a link to the PyPI package.
+* Launchpad: whether the project is managed through Launchpad.
+* PyPI: whether the project deliverables are available through PyPI.
 * State: a code to represent the current state of the decomposition. Possible
   values are:
 
   * [A] External repo available, no code decomposition
   * [B] External repo available, partial code decomposition
   * [C] External repo available, code decomposition is complete
+  * [D] Not deemed required. Driver is already bare-bone and decomposition
+        effort is not considered justified. Assessment may change in the
+        future
 
   Absense of an entry for an existing plugin or driver means no active effort
   has been observed or potentially not required.
@@ -390,42 +393,135 @@ The following chart captures the following aspects:
   completion can be deemed as such, if there is no overlap/duplication between
   what exists in the Neutron tree, and what it exists in the vendor repo.
 
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| Name                          |    Plugins/Drivers    |    Git   | Launchpad |       PyPI       |  State  | Completed in |
-+===============================+=======================+==========+===========+==================+=========+==============+
-| networking-arista             |          ML2          | `[1.g]`_ |     x     |      `[1.p]`_    |   [B]   |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-brocade            |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-cisco              |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-hyperv             |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-metaplugin         |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-midonet            |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-mlnx               |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| nuage-openstack-neutron       |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-odl                |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-ofagent            |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-ovs-dpdk           |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-plumgrid           |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| networking-vphere             |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| pluribus                      |                       |          |           |                  |         |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
-| vmware-nsx                    |    core,fw,lb,vpn     | `[2.g]`_ | `[2.l]`_  |     `[2.p]`_     |   [B]   |              |
-+-------------------------------+-----------------------+----------+-----------+------------------+---------+--------------+
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| Name                          |    Plugins/Drivers    | Launchpad |       PyPI       |  State  | Completed in |
++===============================+=======================+===========+==================+=========+==============+
+| freescale-nscs_               |         ml2,fw        |    no     |       no         |   [D]   |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-arista_            |          ml2          |    no     |       yes        |   [B]   |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-brocade_           |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-cisco_             |  core,ml2,l3,fw,vpn   |    yes    |       yes        |   [B]   |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-hyperv_            |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-metaplugin_        |         core          |    no     |       no         |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-midonet_           |        core,lb        |    yes    |       yes        |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-mlnx_              |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-nec_               |         core          |    yes    |       no         |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| nuage-openstack-neutron_      |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-odl_               |      ml2,l3,lb,fw     |    yes    |       no         |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-ofagent_           |          ml2          |    yes    |       no         |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-ovs-dpdk_          |          ml2          |    yes    |       no         |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-plumgrid_          |          core         |    yes    |       yes        |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| networking-vsphere_           |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| pluribus_                     |                       |           |                  |         |              |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
+| vmware-nsx_                   |         core          |    yes    |       yes        |   [C]   |     Kilo     |
++-------------------------------+-----------------------+-----------+------------------+---------+--------------+
 
-.. _[1.g]: https://github.com/stackforge/networking-arista
-.. _[1.p]: https://pypi.python.org/pypi/networking_arista
-.. _[2.g]: https://github.com/stackforge/vmware-nsx
-.. _[2.l]: https://launchpad.net/vmware-nsx
-.. _[2.p]: https://pypi.python.org/pypi/vmware-nsx
+.. _networking-arista:
+
+Arista
+------
+
+* Git: https://github.com/stackforge/networking-arista
+* Pypi: https://pypi.python.org/pypi/networking-arista
+
+.. _networking-brocade:
+
+.. _networking-cisco:
+
+Cisco
+-----
+
+* Git: https://git.openstack.org/stackforge/networking-cisco
+* Launchpad: https://launchpad.net/networking-cisco
+* PyPI: https://pypi.python.org/pypi/networking-cisco
+
+.. _networking-hyperv:
+
+.. _networking-metaplugin:
+
+Metaplugin
+----------
+
+* Git: https://github.com/ntt-sic/networking-metaplugin
+
+.. _networking-midonet:
+
+MidoNet
+-------
+
+*  Git: https://github.com/stackforge/networking-midonet
+*  Launchpad: https://launchpad.net/networking-midonet
+*  Pypi: https://pypi.python.org/pypi/networking-midonet
+
+.. _networking-mlnx:
+
+.. _networking-nec:
+
+NEC
+---
+
+* Git: https://github.com/stackforge/networking-nec
+* Launchpad: https://launchpad.net/networking-nec
+
+.. _nuage-openstack-neutron:
+
+.. _networking-odl:
+
+OpenDayLight
+------------
+
+* Git: https://github.com/stackforge/networking-odl
+* Launchpad: https://launchpad.net/networking-odl
+
+.. _networking-ofagent:
+
+OpenFlow Agent (ofagent)
+------------------------
+
+* Git: https://github.com/stackforge/networking-ofagent
+* Launchpad: https://launchpad.net/networking-ofagent
+
+.. _networking-ovs-dpdk:
+
+Networking OVS-DPDK
+-------------------
+
+* Git: https://github.com/stackforge/networking-ovs-dpdk
+* Launchpad: https://launchpad.net/networking-ovs-dpdk
+
+.. _networking-plumgrid:
+
+PLUMgrid
+---------
+
+* Git: https://github.com/stackforge/networking-plumgrid
+* Launchpad: https://launchpad.net/networking-plumgrid
+* PyPI: https://pypi.python.org/pypi/networking-plumgrid
+
+.. _networking-vsphere:
+
+.. _pluribus:
+
+.. _vmware-nsx:
+
+VMware
+------
+
+*  Git: https://github.com/stackforge/vmware-nsx
+*  Launchpad: https://launchpad.net/vmware-nsx
+*  Pypi: https://pypi.python.org/pypi/vmware-nsx

@@ -16,14 +16,14 @@
 """Added ipv6_pd_enabled field to Subnets for Prefix Delegation
 
 Revision ID: 2c4f53050bb6
-Revises: 2d2a8a565438
+Revises: 57dd745253a6
 Create Date: 2015-02-23 17:29:33.474792
 
 """
 
 # revision identifiers, used by Alembic.
 revision = '2c4f53050bb6'
-down_revision = '2d2a8a565438'
+down_revision = '57dd745253a6'
 
 from alembic import op
 import sqlalchemy as sa

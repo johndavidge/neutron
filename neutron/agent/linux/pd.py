@@ -37,20 +37,38 @@ class PrefixDelegation(object):
         self.pd_update_cb = pd_update_cb
         self._get_sync_data()
 
+    def _create_pdo_with_pd_info(self, pd_info):
+        pdo = {'prefix': pd_info['prefix'],
+               'old_prefix': None,
+               'ri_ifname': pd_info['ri_ifname'],
+               'mac': None,
+               'bind_lla': None,
+               'bind_lla_with_mask': None,
+               'sync': True,
+               'pdobject': pd_info['pdobject'],
+               'client_started': pd_info['client_started']}
+        return pdo
+
+    @staticmethod
+    def _create_pdo(ri_ifname, mac):
+        pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
+               'old_prefix': l3_constants.TEMP_PD_PREFIX,
+               'ri_ifname': ri_ifname,
+               'mac': mac,
+               'bind_lla': None,
+               'bind_lla_with_mask': None,
+               'sync': False,
+               'pdobject': None,
+               'client_started': False}
+        return pdo
+
     @utils.synchronized("l3-agent-pd")
     def enable_subnet(self, router_id, subnet_id, prefix, ri_ifname, mac):
         router = self.routers.get(router_id)
         if router is not None:
             pdo = router['subnets'].get(subnet_id)
             if not pdo:
-                pdo = {'prefix': l3_constants.TEMP_PD_PREFIX,
-                       'old_prefix': l3_constants.TEMP_PD_PREFIX,
-                       'ri_ifname': ri_ifname,
-                       'mac': mac,
-                       'bind_lla': None,
-                       'bind_lla_with_mask': None,
-                       'sync': False,
-                       'client_started': False}
+                pdo = self._create_pdo(ri_ifname, mac)
                 router['subnets'][subnet_id] = pdo
 
             pdo['bind_lla'] = self._get_lla(mac)
@@ -78,9 +96,7 @@ class PrefixDelegation(object):
     def _delete_pd(self, router_id, router, subnet_id, pdo):
         self._delete_lla_address(router, pdo['bind_lla_with_mask'])
         if pdo['client_started']:
-            dibbler.disable_ipv6_pd(self.pmon, router_id, subnet_id,
-                                    pdo['ri_ifname'],
-                                    router['ns_name'])
+            pdo['pdobject'].disable(self.pmon, router['ns_name'])
 
     @utils.synchronized("l3-agent-pd")
     def disable_subnet(self, router_id, subnet_id):
@@ -140,9 +156,7 @@ class PrefixDelegation(object):
         for subnet_id, pdo in router['subnets'].iteritems():
             self._delete_lla_address(router, pdo['bind_lla_with_mask'])
             if pdo['client_started']:
-                dibbler.disable_ipv6_pd(self.pmon, router_id, subnet_id,
-                                        pdo['ri_ifname'],
-                                        router['ns_name'])
+                pdo['pdobject'].disable(self.pmon, router['ns_name'])
                 pdo['prefix'] = None
                 pdo['client_started'] = False
                 prefix_update[subnet_id] = l3_constants.TEMP_PD_PREFIX
@@ -271,8 +285,7 @@ class PrefixDelegation(object):
             llas = None
             for subnet_id, pdo in router['subnets'].iteritems():
                 if pdo['client_started']:
-                    prefix = dibbler.get_prefix(router_id, subnet_id,
-                                                pdo['ri_ifname'])
+                    prefix = pdo['pdobject'].get_prefix()
                     if prefix != pdo['prefix']:
                         pdo['prefix'] = prefix
                         prefix_update[subnet_id] = prefix
@@ -283,11 +296,10 @@ class PrefixDelegation(object):
                                                 router['ns_name'])
 
                     if self._ensure_lla(pdo['bind_lla_with_mask'], llas):
-                        dibbler.enable_ipv6_pd(self.pmon,
-                                               router_id,
-                                               subnet_id,
-                                               pdo['ri_ifname'],
-                                               router['ns_name'],
+                        if not pdo['pdobject']:
+                            pdo['pdobject'] = dibbler.PDDibbler(router_id,
+                                                  subnet_id, pdo['ri_ifname'])
+                        pdo['pdobject'].enable(self.pmon, router['ns_name'],
                                                router['gw_interface'],
                                                pdo['bind_lla'])
                         pdo['client_started'] = True
@@ -306,19 +318,12 @@ class PrefixDelegation(object):
 
     def _get_sync_data(self):
         sync_data = dibbler.get_sync_data()
-        for requestor_info in sync_data:
-            router_id = requestor_info['router_id']
+        for pd_info in sync_data:
+            router_id = pd_info['router_id']
             if not self.routers.get(router_id):
                 self.routers[router_id] = {'gw_interface': None,
                                            'ns_name': None,
                                            'subnets': {}}
-            pdo = {'prefix': requestor_info['prefix'],
-                   'old_prefix': None,
-                   'ri_ifname': requestor_info['ri_ifname'],
-                   'mac': None,
-                   'bind_lla': None,
-                   'bind_lla_with_mask': None,
-                   'sync': True,
-                   'client_started': requestor_info['client_started']}
+            pdo = self._create_pdo_with_pd_info(pd_info)
             subnets = self.routers[router_id]['subnets']
-            subnets[requestor_info['subnet_id']] = pdo
+            subnets[pd_info['subnet_id']] = pdo

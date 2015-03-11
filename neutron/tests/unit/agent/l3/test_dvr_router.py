@@ -33,10 +33,14 @@ class TestDvrRouterOperations(base.BaseTestCase):
     def setUp(self):
         super(TestDvrRouterOperations, self).setUp()
 
-    def _create_router(self, router, **kwargs):
+    def _create_router(self, router=None, **kwargs):
         agent_conf = mock.Mock()
-        return dvr_router.DvrRouter(mock.sentinel.myhost,
-                                    mock.sentinel.router_id,
+        self.router_id = _uuid()
+        if not router:
+            router = mock.MagicMock()
+        return dvr_router.DvrRouter(mock.sentinel.agent,
+                                    mock.sentinel.myhost,
+                                    self.router_id,
                                     router,
                                     agent_conf,
                                     mock.sentinel.interface_driver,
@@ -166,3 +170,17 @@ class TestDvrRouterOperations(base.BaseTestCase):
             mock.sentinel.device, mock.sentinel.ip_cidr)
         ri.floating_ip_removed_dist.assert_called_once_with(
             mock.sentinel.ip_cidr)
+
+    def test__get_internal_port(self):
+        ri = self._create_router()
+        port = {'fixed_ips': [{'subnet_id': mock.sentinel.subnet_id}]}
+        router_ports = [port]
+        ri.router.get.return_value = router_ports
+        self.assertEqual(port, ri._get_internal_port(mock.sentinel.subnet_id))
+
+    def test__get_internal_port_not_found(self):
+        ri = self._create_router()
+        port = {'fixed_ips': [{'subnet_id': mock.sentinel.subnet_id}]}
+        router_ports = [port]
+        ri.router.get.return_value = router_ports
+        self.assertEqual(None, ri._get_internal_port(mock.sentinel.subnet_id2))
